@@ -225,16 +225,19 @@ document.addEventListener('change',e=>{const t=e.target;
  if(t.id==='member-role'||t.id==='member-company'){roleDraft.active=$('#member-active').checked;if($('#member-dept'))roleDraft.department=$('#member-dept').value;if(t.id==='member-role')roleDraft.role=t.value;else{roleDraft.company=t.value;roleDraft.department=''}paintMember()}
 });
 document.addEventListener('submit',async e=>{e.preventDefault();const f=e.target,p=Object.fromEntries(new FormData(f));
- if(f.id==='config-form'){if(!safeKey(p.key.trim()))return toast('Usitumie secret/service_role key kwenye frontend.');if(!/^https:\/\/[^/]+\/?$/.test(p.url.trim()))return toast('Project URL iwe HTTPS origin bila paths.');localStorage.setItem('group-hub-config',JSON.stringify({url:p.url.trim(),key:p.key.trim()}));closeDialog();await connect(p.url.trim(),p.key.trim());return}
- if(f.id==='auth-form'){if(!sb)return toast('Unganisha Supabase kwanza kupitia Maelekezo.');if(busy)return;busy=true;f.querySelector('button').disabled=true;try{let res;if(authMode==='signup'){res=await sb.auth.signUp({email:p.email,password:p.password,options:{data:{full_name:p.full_name},emailRedirectTo:location.origin+location.pathname}});if(res.error)throw res.error;if(!res.data.session){authMode='login';authView('Akaunti imeombwa. Thibitisha email ikiwa confirmation imewashwa, kisha ingia.')}else{session=res.data.session;await load()}}else{res=await sb.auth.signInWithPassword({email:p.email,password:p.password});if(res.error)throw res.error;session=res.data.session;await load()}}catch(err){toast(errorText(err))}finally{busy=false;f.querySelector('button').disabled=false}return}
+ if(f.getAttribute('id')==='config-form'){if(!safeKey(p.key.trim()))return toast('Usitumie secret/service_role key kwenye frontend.');if(!/^https:\/\/[^/]+\/?$/.test(p.url.trim()))return toast('Project URL iwe HTTPS origin bila paths.');localStorage.setItem('group-hub-config',JSON.stringify({url:p.url.trim(),key:p.key.trim()}));closeDialog();await connect(p.url.trim(),p.key.trim());return}
+ if(f.getAttribute('id')==='auth-form'){if(!sb)return toast('Unganisha Supabase kwanza kupitia Maelekezo.');if(busy)return;busy=true;f.querySelector('button').disabled=true;try{let res;if(authMode==='signup'){res=await sb.auth.signUp({email:p.email,password:p.password,options:{data:{full_name:p.full_name},emailRedirectTo:location.origin+location.pathname}});if(res.error)throw res.error;if(!res.data.session){authMode='login';authView('Akaunti imeombwa. Thibitisha email ikiwa confirmation imewashwa, kisha ingia.')}else{session=res.data.session;await load()}}else{res=await sb.auth.signInWithPassword({email:p.email,password:p.password});if(res.error)throw res.error;session=res.data.session;await load()}}catch(err){toast(errorText(err))}finally{busy=false;f.querySelector('button').disabled=false}return}
  if(!sb||!me?.active)return;
  await run(f,async()=>{let res;
- if(f.id==='create-form')res=await sb.rpc('hub_create',{p});
- else if(f.id==='update-form'){const {id,...values}=p;res=await sb.rpc('hub_update',{p_id:id,p:values})}
- else if(f.id==='decision-form')res=await sb.rpc('hub_decide',{p_id:p.id,p_decision:p.decision,p_note:p.note});
- else if(f.id==='comment-form')res=await sb.rpc('hub_comment',{p_id:p.id,p_message:p.message});
- else if(f.id==='member-form')res=await sb.rpc('hub_set_member',{p_id:p.id,p_role:p.role,p_company:p.company||null,p_department:p.department||'',p_active:new FormData(f).has('active')});
- if(res?.error)throw res.error;
+ if(f.getAttribute('id')==='create-form')res=await sb.rpc('hub_create',{p});
+ else if(f.getAttribute('id')==='update-form'){const {id,...values}=p;res=await sb.rpc('hub_update',{p_id:id,p:values})}
+ else if(f.getAttribute('id')==='decision-form')res=await sb.rpc('hub_decide',{p_id:p.id,p_decision:p.decision,p_note:p.note});
+ else if(f.getAttribute('id')==='comment-form')res=await sb.rpc('hub_comment',{p_id:p.id,p_message:p.message});
+ else if(f.getAttribute('id')==='member-form')res=await sb.rpc('hub_set_member',{p_id:p.id,p_role:p.role,p_company:p.company||null,p_department:p.department||'',p_active:new FormData(f).has('active')});
+ if (!res) {
+  throw new Error('Fomu haijatambuliwa. Hakuna kilichohifadhiwa.');
+}
+if (res.error) throw res.error;
  });
 });
 $('#modal').addEventListener('cancel',e=>{if(busy)e.preventDefault();else activeDetail=null});
