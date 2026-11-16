@@ -246,5 +246,1137 @@ if (res.error) throw res.error;
 });
 $('#modal').addEventListener('cancel',e=>{if(busy)e.preventDefault();else activeDetail=null});
 window.addEventListener('online',()=>{if(session)load(true)});document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&session&&!$('#modal').open)load(true)});
-const initial=config();connect(SUPABASE_URL||initial.url,SUPABASE_ANON_KEY||initial.key);
+/* =========================================
+   MICROFINANCE — DATA NA RUHUSA
+   CODE YA 6
+========================================= */
+
+const MF_STAGE = {
+  new: 'Mpya',
+  contacted: 'Amewasiliana',
+  appointment: 'Appointment',
+  preparing: 'Maombi yanaandaliwa',
+  handed_off: 'Amekabidhiwa kwa tathmini',
+  closed: 'Imefungwa'
+};
+
+const MF_SOURCE = {
+  outreach: 'Outreach',
+  referral: 'Referral',
+  social: 'Mitandao',
+  walk_in: 'Amefika ofisini',
+  phone: 'Simu',
+  other: 'Nyingine'
+};
+
+
+/* Taarifa zinazopakiwa kutoka Supabase. */
+
+let mfRows = [];
+let mfSummary = null;
+let mfTotal = 0;
+
+let mfPage = 0;
+let mfTab = 'overview';
+
+let mfStage = '';
+let mfSource = '';
+let mfName = '';
+let mfDue = false;
+
+let mfError = '';
+let mfFetching = false;
+let mfEpoch = 0;
+let mfActor = '';
+
+let mfDetailToken = 0;
+let mfSearchTimer;
+
+
+/* Nani anaweza kufungua moduli? */
+
+const mfAllowed = () => {
+  return !!me?.active && (
+    group() ||
+    me.company === 'microfinance'
+  );
+};
+
+
+/* Nani anaweza kuendesha prospects? */
+
+const mfOperate = () => {
+  return !!me?.active &&
+    me.company === 'microfinance' &&
+    ['manager', 'lead'].includes(me.role);
+};
+
+
+/* Nani anaweza kugawa prospects kwa wengine? */
+
+const mfManager = () => {
+  return mfOperate() && me.role === 'manager';
+};
+
+
+/* Orodha ya watendaji active wa Microfinance. */
+
+const mfOwners = () => {
+  return members.filter(member =>
+    member.active &&
+    member.company === 'microfinance' &&
+    ['manager', 'lead'].includes(member.role)
+  );
+};
+
+
+const mfOwnerOptions = selectedId => {
+  return mfOwners().map(member => `
+    <option
+      value="${member.id}"
+      ${member.id === selectedId ? 'selected' : ''}
+    >
+      ${esc(member.full_name || member.email)}
+    </option>
+  `).join('');
+};
+
+
+const mfPerson = id => {
+  return members.find(member =>
+    member.id === id
+  )?.full_name || 'Mhusika';
+};
+
+
+/* Ujumbe unaoeleweka ikiwa database haijaandaliwa. */
+
+function mfErrorText(error) {
+  if ([
+    '42P01',
+    'PGRST202',
+    'PGRST205'
+  ].includes(error?.code)) {
+    return (
+      'Microfinance module haijakamilika kwenye database. ' +
+      'Hakiki kwamba SQL za hatua 1 hadi 5 zimekimbia.'
+    );
+  }
+
+  return errorText(error);
+}
+
+
+/* Pakia dashboard na prospects.
+   Directors/GM hupata summary pekee.
+   Watendaji hupata rekodi zinazokubaliwa na RLS.
+*/
+
+async function mfFetch() {
+  if (!sb || !mfAllowed()) {
+    mfEpoch++;
+    mfRows = [];
+    mfSummary = null;
+    mfTotal = 0;
+    mfActor = '';
+    mfFetching = false;
+    return;
+  }
+
+  const actorSignature = [
+    me.id,
+    me.role,
+    me.company,
+    me.department
+  ].join('|');
+
+  if (actorSignature !== mfActor) {
+    mfRows = [];
+    mfSummary = null;
+    mfTotal = 0;
+    mfPage = 0;
+    mfActor = actorSignature;
+  }
+
+  const requestToken = ++mfEpoch;
+
+  mfFetching = true;
+  mfError = '';
+
+  try {
+    const requests = [
+      sb.rpc('hub_mf_summary')
+    ];
+
+    if (mfOperate()) {
+      let query = sb
+        .from('hub_mf_prospects')
+        .select('*', { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: true })
+        .range(
+          mfPage * 50,
+          mfPage * 50 + 49
+        );
+
+      if (mfStage) {
+        query = query.eq('stage', mfStage);
+      }
+
+      if (mfSource) {
+        query = query.eq('source', mfSource);
+      }
+
+      if (mfName.trim()) {
+        const searchName = mfName
+          .trim()
+          .replace(/[\\%_]/g, '\\$&');
+
+        query = query.ilike(
+          'full_name',
+          '%' + searchName + '%'
+        );
+      }
+
+      if (mfDue) {
+        query = query
+          .lte('next_date', day())
+          .not(
+            'stage',
+            'in',
+            '(closed,handed_off)'
+          );
+      }
+
+      requests.push(query);
+    }
+
+    const results = await Promise.all(requests);
+
+    /* Usionyeshe response ya session/ruhusa za zamani. */
+    const currentSignature = me ? [
+      me.id,
+      me.role,
+      me.company,
+      me.department
+    ].join('|') : '';
+
+    if (
+      requestToken !== mfEpoch ||
+      !mfAllowed() ||
+      currentSignature !== actorSignature
+    ) {
+      return;
+    }
+
+    for (const result of results) {
+      if (result.error) {
+        throw result.error;
+      }
+    }
+
+    mfSummary = results[0].data || {};
+    mfRows = results[1]?.data || [];
+    mfTotal = results[1]?.count || 0;
+
+  } catch (error) {
+    if (requestToken === mfEpoch) {
+      mfError = mfErrorText(error);
+      mfRows = [];
+      mfSummary = null;
+      mfTotal = 0;
+    }
+
+  } finally {
+    if (requestToken === mfEpoch) {
+      mfFetching = false;
+
+      if (
+        page === 'clients' &&
+        me?.active
+      ) {
+        render();
+      }
+    }
+  }
+}
+
+
+/* Ongeza upakiaji wa Microfinance kwenye load
+   iliyopo bila kuondoa sehemu nyingine za mfumo.
+*/
+
+const mfOriginalLoad = load;
+
+load = async function(quiet = false) {
+  await mfOriginalLoad(quiet);
+
+  if (
+    session &&
+    me?.active &&
+    mfAllowed()
+  ) {
+    await mfFetch();
+
+  } else {
+    mfEpoch++;
+    mfRows = [];
+    mfSummary = null;
+    mfTotal = 0;
+    mfActor = '';
+    mfFetching = false;
+  }
+};
+
+/* MWISHO WA CODE YA 6 */
+
+/* =========================================
+   MICROFINANCE — MENU NA DASHBOARD
+   CODE YA 7
+========================================= */
+
+
+/* Ongeza menu mara moja tu. */
+
+if (!NAV.some(item => item[0] === 'clients')) {
+  NAV.splice(
+    7,
+    0,
+    ['clients', 'Clients & Pipeline', '◉']
+  );
+}
+
+
+/* Muonekano wa chati na dashboard. */
+
+const mfDashboardStyle = document.createElement('style');
+
+mfDashboardStyle.textContent = `
+  .mf-dashboard-note {
+    margin: 18px 0;
+    color: #7c9081;
+    font-size: 12px;
+    line-height: 1.8;
+  }
+
+  .mf-chart-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin: 22px 0;
+  }
+
+  .mf-chart-panel {
+    padding: 22px;
+  }
+
+  .mf-chart-panel h3 {
+    margin-bottom: 22px;
+    font-size: 14px;
+  }
+
+  .mf-chart-row {
+    display: grid;
+    grid-template-columns: 155px 1fr 35px;
+    align-items: center;
+    gap: 12px;
+    margin: 17px 0;
+    font-size: 11px;
+  }
+
+  .mf-chart-track {
+    height: 9px;
+    background: #edf2ee;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .mf-chart-fill {
+    display: block;
+    height: 100%;
+    background: #5f9279;
+    border-radius: 8px;
+  }
+
+  .mf-chart-empty {
+    padding: 25px 0;
+    color: #95a69a;
+    font-size: 12px;
+    text-align: center;
+  }
+
+  .mf-flow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 18px 0;
+  }
+
+  .mf-flow span {
+    background: #eef4ef;
+    color: #54735d;
+    padding: 9px 11px;
+    border-radius: 6px;
+    font-size: 11px;
+  }
+
+  .mf-module-error {
+    padding: 28px;
+    line-height: 1.8;
+    color: #976b55;
+  }
+
+  @media (max-width: 850px) {
+    .mf-chart-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 520px) {
+    .mf-chart-row {
+      grid-template-columns: 115px 1fr 28px;
+      gap: 8px;
+    }
+
+    .mf-chart-panel {
+      padding: 17px;
+    }
+  }
+`;
+
+document.head.appendChild(mfDashboardStyle);
+
+
+/* Kuchora horizontal bar charts. */
+
+function mfBars(data, getLabel) {
+  if (!data.length) {
+    return `
+      <p class="mf-chart-empty">
+        Hakuna taarifa bado.
+      </p>
+    `;
+  }
+
+  const maximum = Math.max(
+    1,
+    ...data.map(item => Number(item.n) || 0)
+  );
+
+  return data.map(item => {
+    const count = Math.max(0, Number(item.n) || 0);
+    const width = (count / maximum) * 100;
+
+    return `
+      <div class="mf-chart-row">
+        <span>${esc(getLabel(item))}</span>
+
+        <div class="mf-chart-track">
+          <span
+            class="mf-chart-fill"
+            style="width: ${width}%"
+          ></span>
+        </div>
+
+        <b>${count}</b>
+      </div>
+    `;
+  }).join('');
+}
+
+
+/* Dashboard ya acquisition. */
+
+function mfRender() {
+  const container = $('#pagebody');
+
+  if (!container || !mfAllowed()) {
+    return;
+  }
+
+  if (mfError) {
+    container.innerHTML = `
+      <section class="panel">
+        <div class="mf-module-error">
+          <h3>Moduli haijapakia</h3>
+
+          <p>${esc(mfError)}</p>
+
+          <button
+            data-action="mf-refresh"
+            style="margin-top: 16px"
+          >
+            Jaribu tena
+          </button>
+        </div>
+      </section>
+    `;
+
+    return;
+  }
+
+  if (!mfSummary) {
+    container.innerHTML = `
+      <section class="panel">
+        <div class="empty">
+          <h3>Inapakia taarifa za Microfinance…</h3>
+        </div>
+      </section>
+    `;
+
+    return;
+  }
+
+  const summary = mfSummary;
+
+  const stageCounts = Object.fromEntries(
+    (summary.stages || []).map(item => [
+      item.stage,
+      Number(item.n) || 0
+    ])
+  );
+
+  const stats = [
+    [
+      'Prospects wote',
+      summary.total || 0,
+      'Rekodi zinazoruhusiwa kwako'
+    ],
+    [
+      'Bado wanafuatiliwa',
+      summary.active || 0,
+      'Prospects zilizo wazi'
+    ],
+    [
+      'Follow-ups leo',
+      summary.due_today || 0,
+      `${summary.overdue || 0} zimechelewa`
+    ],
+    [
+      'Wamekabidhiwa',
+      summary.handed_off || 0,
+      'Kwa tathmini ya mikopo'
+    ]
+  ];
+
+  const accessMessage = mfOperate()
+    ? (
+        mfManager()
+          ? 'Unaona muhtasari wa prospects wote wa Microfinance.'
+          : 'Unaona muhtasari wa prospects ulizokabidhiwa pekee.'
+      )
+    : (
+        'Unaona muhtasari wa acquisition. ' +
+        'Majina, simu na maelezo binafsi ya prospects ' +
+        'hayaonyeshwi kwenye akaunti hii.'
+      );
+
+  container.innerHTML = `
+    <section class="stats">
+      ${stats.map(([title, count, description]) => `
+        <div class="stat">
+          <div class="stat-top">
+            ${esc(title)}
+          </div>
+
+          <strong>${Number(count)}</strong>
+
+          <small>${esc(description)}</small>
+        </div>
+      `).join('')}
+    </section>
+
+
+    <p class="mf-dashboard-note">
+      ${esc(accessMessage)}
+      “Amekabidhiwa” haimaanishi
+      “ameidhinishwa mkopo” au “amepewa fedha.”
+    </p>
+
+
+    <div class="mf-chart-grid">
+
+      <section class="panel mf-chart-panel">
+        <h3>Mgawanyo wa hatua za sasa</h3>
+
+        ${mfBars(
+          Object.keys(MF_STAGE).map(stage => ({
+            stage,
+            n: stageCounts[stage] || 0
+          })),
+          item => MF_STAGE[item.stage]
+        )}
+
+        <p class="mf-dashboard-note">
+          Chati inaonyesha hatua za sasa za prospects.
+          Si conversion rate ya cohort.
+        </p>
+      </section>
+
+
+      <section class="panel mf-chart-panel">
+        <h3>Vyanzo vya prospects</h3>
+
+        ${mfBars(
+          summary.sources || [],
+          item => MF_SOURCE[item.source] || item.source
+        )}
+      </section>
+
+
+      <section class="panel mf-chart-panel">
+        <h3>Prospects wapya — wiki nne</h3>
+
+        ${mfBars(
+          summary.weeks || [],
+          item => fmt(item.week)
+        )}
+      </section>
+
+
+      <section class="panel mf-chart-panel">
+        <h3>Flow ya acquisition</h3>
+
+        <div class="mf-flow">
+          ${Object.entries(MF_STAGE)
+            .filter(([key]) => key !== 'closed')
+            .map(([, label]) => `
+              <span>${esc(label)}</span>
+            `)
+            .join('')}
+        </div>
+
+        <p class="mf-dashboard-note">
+          Kila prospect aliye wazi awe na mhusika,
+          hatua inayofuata na tarehe ya kufuatiliwa.
+          Prospect asiyeendelea afungwe kwa sababu
+          iliyoandikwa.
+        </p>
+      </section>
+
+    </div>
+
+
+    <section class="panel">
+      <div class="panelhead">
+        <h2>Utendaji kwa mhusika</h2>
+      </div>
+
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>MHUSIKA</th>
+              <th>PROSPECTS</th>
+              <th>WAMEKABIDHIWA</th>
+              <th>FOLLOW-UPS ZILIZOCHELEWA</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            ${(summary.owners || []).map(owner => `
+              <tr>
+                <td>${esc(owner.full_name)}</td>
+                <td>${Number(owner.total)}</td>
+                <td>${Number(owner.handed_off)}</td>
+                <td>${Number(owner.overdue)}</td>
+              </tr>
+            `).join('') || `
+              <tr>
+                <td colspan="4">
+                  Hakuna prospects zilizorekodiwa bado.
+                </td>
+              </tr>
+            `}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+
+/* Tumia render ya mfumo iliyopo,
+   kisha ongeza ukurasa wa Microfinance.
+*/
+
+const mfOriginalRender = render;
+
+render = function() {
+  if (page === 'clients' && !mfAllowed()) {
+    page = 'dashboard';
+  }
+
+  mfOriginalRender();
+
+  if (!me?.active) {
+    return;
+  }
+
+  const menuButton = document.querySelector(
+    '[data-action="nav"][data-page="clients"]'
+  );
+
+  if (menuButton && !mfAllowed()) {
+    menuButton.remove();
+  }
+
+  if (page !== 'clients' || !mfAllowed()) {
+    return;
+  }
+
+  const heading = document.querySelector('.pagehead');
+
+  if (heading) {
+    heading.querySelector('h1').textContent =
+      'Clients & Pipeline';
+
+    heading.querySelector('p').textContent =
+      'MATTEX Microfinance · Acquisition na ufuatiliaji';
+
+    heading.querySelector('.headbuttons').innerHTML = `
+      <button
+        class="outline"
+        data-action="mf-refresh"
+      >
+        ↻ Pakia upya
+      </button>
+    `;
+  }
+
+  /* Hapa ni Microfinance pekee;
+     ficha filters za kampuni nyingine. */
+  const mainFilters = document.querySelector('.filterbar');
+
+  if (mainFilters) {
+    mainFilters.style.display = 'none';
+  }
+
+  mfRender();
+};
+
+
+/* Kufungua menu mpya na kupakia dashboard.
+   Capture phase inazuia handler ya zamani
+   kushughulikia kitendo hiki mara ya pili.
+*/
+
+document.addEventListener('click', async event => {
+  const button = event.target.closest('[data-action]');
+
+  if (!button) {
+    return;
+  }
+
+  const action = button.dataset.action;
+
+  const opensMicrofinance =
+    action === 'nav' &&
+    button.dataset.page === 'clients';
+
+  const refreshesMicrofinance =
+    action === 'mf-refresh';
+
+  if (!opensMicrofinance && !refreshesMicrofinance) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  if (busy || !mfAllowed()) {
+    return;
+  }
+
+  if (opensMicrofinance) {
+    page = 'clients';
+    search = '';
+
+    document.body.classList.remove('menuopen');
+
+    render();
+  }
+
+  await mfFetch();
+
+}, true);
+
+
+/* MWISHO WA CODE YA 7 */
+/* =========================================
+   MICROFINANCE — PROSPECT MPYA
+   CODE YA 8
+========================================= */
+
+
+/* Fomu ya kuongeza prospect.
+   Inafunguliwa na watendaji wa Microfinance tu.
+*/
+
+function mfNew() {
+  if (!mfOperate()) {
+    toast(
+      'Manager au kiongozi wa Microfinance ' +
+      'pekee anaongeza prospects.'
+    );
+    return;
+  }
+
+  const ownerOptions = mfManager()
+    ? mfOwnerOptions(me.id)
+    : `
+      <option value="${me.id}">
+        ${esc(me.full_name || me.email)}
+      </option>
+    `;
+
+  const outreachTasks = items.filter(item =>
+    item.company === 'microfinance' &&
+    item.kind === 'task'
+  );
+
+  dialog(`
+    <div class="modalhead">
+      <div>
+        <span class="eyebrow">
+          MICROFINANCE / ACQUISITION
+        </span>
+
+        <h2>Prospect mpya</h2>
+      </div>
+
+      <button
+        class="iconbtn"
+        data-action="close"
+        aria-label="Funga"
+      >
+        ✕
+      </button>
+    </div>
+
+
+    <form id="mf-create-form">
+
+      <label>
+        Jina kamili
+
+        <input
+          name="full_name"
+          minlength="2"
+          maxlength="120"
+          autocomplete="off"
+          required
+        >
+      </label>
+
+
+      <div class="formrow">
+        <label>
+          Simu
+
+          <input
+            name="phone"
+            type="tel"
+            placeholder="07XXXXXXXX au +255…"
+            required
+          >
+        </label>
+
+        <label>
+          Eneo
+
+          <input
+            name="area"
+            maxlength="120"
+            placeholder="Mfano: Mwenge"
+          >
+        </label>
+      </div>
+
+
+      <label>
+        Shughuli / biashara
+
+        <input
+          name="business"
+          maxlength="150"
+          placeholder="Mfano: Duka la nguo"
+        >
+      </label>
+
+
+      <label>
+        Hitaji la huduma
+
+        <textarea
+          name="need"
+          rows="3"
+          maxlength="1000"
+          placeholder="Eleza hitaji la awali kwa ufupi."
+        ></textarea>
+      </label>
+
+
+      <div class="formrow">
+        <label>
+          Chanzo cha prospect
+
+          <select name="source" required>
+            ${options(MF_SOURCE, 'outreach')}
+          </select>
+        </label>
+
+        <label>
+          Campaign / reference
+
+          <input
+            name="campaign"
+            maxlength="120"
+            placeholder="Mfano: Outreach-Mwenge-Nov"
+          >
+        </label>
+      </div>
+
+
+      <div class="formrow">
+        <label>
+          Mhusika wa kumfuatilia
+
+          <select name="owner_id" required>
+            ${ownerOptions}
+          </select>
+        </label>
+
+        <label>
+          Kazi ya outreach — hiari
+
+          <select name="related_task">
+            <option value="">
+              Haijaunganishwa
+            </option>
+
+            ${outreachTasks.map(task => `
+              <option value="${task.id}">
+                ${esc(task.title)}
+              </option>
+            `).join('')}
+          </select>
+        </label>
+      </div>
+
+
+      <label>
+        Hatua inayofuata
+
+        <input
+          name="next_action"
+          maxlength="500"
+          placeholder="Mfano: Kupiga simu kupanga appointment"
+          required
+        >
+      </label>
+
+
+      <label>
+        Tarehe ya hatua inayofuata
+
+        <input
+          name="next_date"
+          type="date"
+          value="${day()}"
+          required
+        >
+      </label>
+
+
+      <label class="checklabel">
+        <input
+          name="contact_consent"
+          type="checkbox"
+          required
+        >
+
+        Prospect amekubali kuwasiliana nasi
+        kwa ufuatiliaji wa huduma hii.
+      </label>
+
+
+      <div class="notice small">
+        Rekodi hii ni ya kutafuta na kufuatilia mteja.
+        Si idhini ya mkopo wala ahadi ya kutoa fedha.
+        Usiweke password, PIN au nyaraka za
+        utambulisho kwenye maelezo haya.
+      </div>
+
+
+      <div class="modalactions">
+        <button
+          type="button"
+          class="outline"
+          data-action="close"
+        >
+          Ghairi
+        </button>
+
+        <button type="submit">
+          Hifadhi prospect
+        </button>
+      </div>
+
+    </form>
+  `);
+}
+
+
+/* Ongeza kitufe kwenye ukurasa wa Microfinance.
+   Hifadhi render ya Code ya 7 kabla ya kuipanua.
+*/
+
+const mfRenderBeforeCreateButton = render;
+
+render = function() {
+  mfRenderBeforeCreateButton();
+
+  if (
+    page !== 'clients' ||
+    !mfOperate()
+  ) {
+    return;
+  }
+
+  const buttons = document.querySelector(
+    '.pagehead .headbuttons'
+  );
+
+  if (
+    buttons &&
+    !buttons.querySelector('[data-action="mf-new"]')
+  ) {
+    buttons.insertAdjacentHTML(
+      'beforeend',
+      `
+        <button data-action="mf-new">
+          ＋ Prospect mpya
+        </button>
+      `
+    );
+  }
+};
+
+
+/* Fungua fomu.
+   Pia safisha data ya module mtu akitoka.
+*/
+
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-action]');
+
+  if (!button) {
+    return;
+  }
+
+  const action = button.dataset.action;
+
+  if (action === 'logout') {
+    mfEpoch++;
+    mfDetailToken++;
+
+    mfRows = [];
+    mfSummary = null;
+    mfTotal = 0;
+    mfActor = '';
+    mfFetching = false;
+
+    return;
+  }
+
+  if (action !== 'mf-new') {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  if (!busy) {
+    mfNew();
+  }
+
+}, true);
+
+
+/* Hifadhi prospect kupitia function ya Supabase.
+   Capture phase inazuia generic submit handler
+   kushughulikia fomu hii.
+*/
+
+document.addEventListener('submit', async event => {
+  const form = event.target;
+
+  if (
+    form.getAttribute('id') !== 'mf-create-form'
+  ) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  if (busy) {
+    return;
+  }
+
+  if (!sb || !mfOperate()) {
+    toast('Huna ruhusa ya kuongeza prospect.');
+    return;
+  }
+
+  const formData = new FormData(form);
+  const prospect = Object.fromEntries(formData);
+
+  prospect.contact_consent =
+    formData.has('contact_consent');
+
+  busy = true;
+
+  const formButtons = form.querySelectorAll('button');
+
+  formButtons.forEach(button => {
+    button.disabled = true;
+  });
+
+  try {
+    const result = await sb.rpc(
+      'hub_mf_create',
+      { p: prospect }
+    );
+
+    if (result.error) {
+      throw result.error;
+    }
+
+    busy = false;
+
+    closeDialog();
+
+    await mfFetch();
+
+    toast('Prospect amehifadhiwa kikamilifu.');
+
+  } catch (error) {
+    toast(mfErrorText(error));
+
+  } finally {
+    busy = false;
+
+    formButtons.forEach(button => {
+      button.disabled = false;
+    });
+  }
+
+}, true);
+
+
+/* MWISHO WA CODE YA 8 */
+
+  const initial=config();connect(SUPABASE_URL||initial.url,SUPABASE_ANON_KEY||initial.key);
 </script></body></html>
