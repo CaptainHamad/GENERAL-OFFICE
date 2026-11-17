@@ -2510,5 +2510,338 @@ document.addEventListener('submit', async event => {
 }, true);
 
 /* MWISHO WA CODE YA 10 */
+/* MICROFINANCE — CODE YA 11 */
+
+function mfPrintGrowthReport() {
+  if (!mfAllowed() || !mfSummary || mfFetching || mfError) {
+    toast('Pakia takwimu kwanza kabla ya kutoa ripoti.');
+    return;
+  }
+
+  const summary = mfSummary;
+
+  const number = value =>
+    new Intl.NumberFormat('en-TZ').format(Number(value) || 0);
+
+  const total = Number(summary.total) || 0;
+  const handedOff = Number(summary.handed_off) || 0;
+
+  const handoffRate = total > 0
+    ? ((handedOff / total) * 100).toFixed(1)
+    : '0.0';
+
+  const scope = group()
+    ? 'Muhtasari wa Microfinance kwa uongozi wa kundi'
+    : mfManager()
+      ? 'Muhtasari wa Microfinance'
+      : 'Muhtasari wa prospects ulizopangiwa';
+
+  const generatedAt = new Date().toLocaleString('sw-TZ', {
+    timeZone: 'Africa/Nairobi',
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  });
+
+  function chart(rows, labelFor) {
+    const data = Array.isArray(rows) ? rows : [];
+    const maximum = Math.max(
+      1,
+      ...data.map(row => Number(row.n) || 0)
+    );
+
+    if (!data.length) {
+      return '<p>Hakuna takwimu bado.</p>';
+    }
+
+    return data.map(row => {
+      const count = Number(row.n) || 0;
+      const width = Math.max(0, count / maximum * 100);
+
+      return `
+        <div class="chart-row">
+          <div class="chart-label">
+            <span>${esc(labelFor(row))}</span>
+            <strong>${number(count)}</strong>
+          </div>
+          <div class="track">
+            <div class="bar" style="width:${width}%"></div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  const report = window.open('', '_blank');
+
+  if (!report) {
+    toast('Ruhusu pop-ups ili kufungua ripoti.');
+    return;
+  }
+
+  report.opener = null;
+
+  report.document.write(`
+    <!doctype html>
+    <html lang="sw">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>Microfinance — Ripoti ya Ukuaji</title>
+
+      <style>
+        * { box-sizing: border-box; }
+
+        body {
+          margin: 0;
+          background: #f3f6f5;
+          color: #203b33;
+          font-family: Arial, sans-serif;
+          line-height: 1.5;
+        }
+
+        main {
+          max-width: 960px;
+          margin: 28px auto;
+          padding: 36px;
+          background: white;
+        }
+
+        header {
+          border-bottom: 3px solid #245e4e;
+          padding-bottom: 20px;
+          margin-bottom: 24px;
+        }
+
+        h1 { margin: 6px 0; font-size: 27px; }
+        h2 { font-size: 18px; margin-top: 28px; }
+        p { margin: 6px 0; }
+        .muted { color: #65766f; font-size: 13px; }
+
+        .stats {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 12px;
+        }
+
+        .stat {
+          border: 1px solid #dce6e1;
+          border-radius: 10px;
+          padding: 16px;
+          break-inside: avoid;
+        }
+
+        .stat strong {
+          display: block;
+          font-size: 29px;
+          margin-top: 5px;
+        }
+
+        .charts {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 30px;
+        }
+
+        .chart-row {
+          margin: 14px 0;
+          break-inside: avoid;
+        }
+
+        .chart-label {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          font-size: 13px;
+          margin-bottom: 5px;
+        }
+
+        .track {
+          height: 12px;
+          background: #edf2ef;
+          border-radius: 6px;
+          overflow: hidden;
+        }
+
+        .bar {
+          height: 100%;
+          background: #245e4e;
+        }
+
+        .note {
+          background: #eef5f1;
+          padding: 15px;
+          border-radius: 8px;
+          margin-top: 25px;
+          font-size: 13px;
+        }
+
+        button {
+          background: #245e4e;
+          color: white;
+          border: 0;
+          border-radius: 7px;
+          padding: 12px 18px;
+          cursor: pointer;
+        }
+
+        .toolbar {
+          display: flex;
+          justify-content: flex-end;
+          margin-bottom: 20px;
+        }
+
+        @media (max-width: 650px) {
+          main { margin: 0; padding: 22px; }
+          .stats { grid-template-columns: 1fr 1fr; }
+          .charts { grid-template-columns: 1fr; }
+        }
+
+        @media print {
+          @page { size: A4; margin: 15mm; }
+          body { background: white; }
+          main { margin: 0; padding: 0; max-width: none; }
+          .toolbar { display: none; }
+          .bar {
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
+          }
+        }
+      </style>
+    </head>
+
+    <body>
+      <main>
+        <div class="toolbar">
+          <button id="print-report">Chapisha / Hifadhi PDF</button>
+        </div>
+
+        <header>
+          <p class="muted">GROUP HUB · MATTEX MICROFINANCE</p>
+          <h1>Ripoti ya Ukuaji wa Wateja</h1>
+          <p>${esc(scope)}</p>
+          <p class="muted">
+            Imetolewa: ${esc(generatedAt)} · Saa za Tanzania
+          </p>
+        </header>
+
+        <section class="stats">
+          <div class="stat">
+            Prospects wote
+            <strong>${number(total)}</strong>
+          </div>
+
+          <div class="stat">
+            Wanaoendelea kufuatiliwa
+            <strong>${number(summary.active)}</strong>
+          </div>
+
+          <div class="stat">
+            Follow-up za leo
+            <strong>${number(summary.due_today)}</strong>
+          </div>
+
+          <div class="stat">
+            Follow-up zilizochelewa
+            <strong>${number(summary.overdue)}</strong>
+          </div>
+
+          <div class="stat">
+            Waliokabidhiwa kwa tathmini
+            <strong>${number(handedOff)}</strong>
+          </div>
+
+          <div class="stat">
+            Sehemu iliyokabidhiwa kwa tathmini
+            <strong>${handoffRate}%</strong>
+          </div>
+        </section>
+
+        <div class="charts">
+          <section>
+            <h2>Prospects kwa hatua ya sasa</h2>
+            ${chart(
+              summary.stages,
+              row => MF_STAGE[row.stage] || row.stage
+            )}
+          </section>
+
+          <section>
+            <h2>Vyanzo vya prospects</h2>
+            ${chart(
+              summary.sources,
+              row => MF_SOURCE[row.source] || row.source
+            )}
+          </section>
+        </div>
+
+        <section>
+          <h2>Prospects wapya kwa wiki</h2>
+          ${chart(
+            summary.weeks,
+            row => String(row.week || '').slice(0, 10)
+          )}
+        </section>
+
+        <div class="note">
+          <strong>Jinsi ya kusoma ripoti:</strong>
+          Takwimu zinaonyesha taarifa zilizopakiwa wakati ripoti
+          inatolewa. Filters za orodha na pagination hazibadilishi
+          muhtasari huu. Asilimia ya waliokabidhiwa ni idadi iliyo
+          kwenye hatua hiyo sasa, ikigawanywa kwa prospects wote.
+          Kukabidhiwa kwa tathmini hakumaanishi mkopo umeidhinishwa
+          au kutolewa. Chart ya wiki inaonyesha historia ya
+          prospects wapya, si makadirio ya matokeo yajayo.
+        </div>
+      </main>
+    </body>
+    </html>
+  `);
+
+  report.document.close();
+
+  report.document
+    .getElementById('print-report')
+    .addEventListener('click', () => report.print());
+}
+
+/* Ongeza kitufe cha ripoti kwenye Clients & Pipeline. */
+
+const mfRenderBeforeGrowthReport = render;
+
+render = function() {
+  mfRenderBeforeGrowthReport();
+
+  if (page !== 'clients' || !mfAllowed()) return;
+
+  const buttons = $('.headbuttons');
+
+  if (
+    buttons &&
+    !buttons.querySelector('[data-mf-report]')
+  ) {
+    buttons.insertAdjacentHTML('beforeend', `
+      <button
+        type="button"
+        class="outline"
+        data-mf-report="growth"
+      >
+        Ripoti ya ukuaji
+      </button>
+    `);
+  }
+};
+
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-mf-report="growth"]');
+  if (!button) return;
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  mfPrintGrowthReport();
+}, true);
+
+/* MWISHO WA CODE YA 11 */
+  
   const initial=config();connect(SUPABASE_URL||initial.url,SUPABASE_ANON_KEY||initial.key);
 </script></body></html>
