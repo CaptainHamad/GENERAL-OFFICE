@@ -2231,6 +2231,284 @@ document.addEventListener('input', event => {
 
 
 /* MWISHO WA CODE YA 9 */
+/* MICROFINANCE — CODE YA 10 */
 
+function mfAvailableStages(prospect) {
+  if (mfManager()) return MF_STAGE;
+
+  const allowed = {
+    new: ['new', 'contacted', 'appointment', 'closed'],
+    contacted: ['contacted', 'appointment', 'preparing', 'closed'],
+    appointment: ['appointment', 'contacted', 'preparing', 'closed'],
+    preparing: ['preparing', 'appointment', 'handed_off', 'closed'],
+    handed_off: ['handed_off'],
+    closed: ['closed']
+  };
+
+  return Object.fromEntries(
+    (allowed[prospect.stage] || []).map(key => [
+      key,
+      MF_STAGE[key]
+    ])
+  );
+}
+
+function mfSyncFollowupFields() {
+  const select = $('#mf-touch-stage');
+  if (!select) return;
+
+  const isClosed = select.value === 'closed';
+  const isTerminal = ['closed', 'handed_off'].includes(select.value);
+
+  $('#mf-close-section').hidden = !isClosed;
+  $('#mf-close-reason').required = isClosed;
+
+  $('#mf-next-section').hidden = isTerminal;
+  $('#mf-touch-next-action').required = !isTerminal;
+  $('#mf-touch-next-date').required = !isTerminal;
+}
+
+/* Ongeza fomu kwenye ukurasa wa taarifa za prospect. */
+
+const mfReadOnlyViewBeforeUpdates = mfViewProspect;
+
+mfViewProspect = async function(id) {
+  if (!mfOperate()) return;
+
+  const prospect = mfRows.find(row => row.id === id);
+  if (!prospect) return;
+
+  const actorId = me.id;
+  const expectedToken = mfDetailToken + 1;
+
+  await mfReadOnlyViewBeforeUpdates(id);
+
+  if (
+    !mfOperate() ||
+    me.id !== actorId ||
+    !$('#modal').open ||
+    mfDetailToken !== expectedToken ||
+    !$('#modal-body .detailbody dl')
+  ) return;
+
+  const historyHeading = $('#modal-body .historytitle');
+  if (!historyHeading) return;
+
+  historyHeading.insertAdjacentHTML('beforebegin', `
+    <form id="mf-touch-form" style="padding:0;margin-top:24px">
+
+      <h3>Rekodi mawasiliano / badilisha hatua</h3>
+
+      <input
+        type="hidden"
+        name="prospect_id"
+        value="${esc(prospect.id)}"
+      >
+
+      <input
+        type="hidden"
+        name="version"
+        value="${Number(prospect.version)}"
+      >
+
+      <div class="formrow">
+        <label>
+          Aina ya mawasiliano
+
+          <select name="activity_type" required>
+            ${options({
+              call: 'Simu',
+              visit: 'Ziara',
+              meeting: 'Kikao',
+              message: 'Ujumbe',
+              note: 'Maelezo',
+              correction: 'Marekebisho'
+            }, 'call')}
+          </select>
+        </label>
+
+        <label>
+          Hatua ya prospect
+
+          <select
+            name="stage"
+            id="mf-touch-stage"
+            required
+          >
+            ${options(
+              mfAvailableStages(prospect),
+              prospect.stage
+            )}
+          </select>
+        </label>
+      </div>
+
+      ${mfManager() ? `
+        <label style="margin-top:16px">
+          Mhusika wa kumfuatilia
+
+          <select name="owner_id" required>
+            <option value="">Chagua mhusika active</option>
+            ${mfOwnerOptions(prospect.owner_id)}
+          </select>
+        </label>
+      ` : ''}
+
+      <label style="margin-top:16px">
+        Matokeo ya mazungumzo / sababu ya mabadiliko
+
+        <textarea
+          name="note"
+          rows="3"
+          maxlength="2000"
+          required
+          placeholder="Mfano: Nimezungumza naye; amekubali appointment ya kesho."
+        ></textarea>
+      </label>
+
+      <div id="mf-close-section" hidden>
+        <label style="margin-top:16px">
+          Sababu ya kufunga prospect
+
+          <textarea
+            name="closed_reason"
+            id="mf-close-reason"
+            rows="2"
+            maxlength="1000"
+          >${esc(prospect.closed_reason || '')}</textarea>
+        </label>
+      </div>
+
+      <div id="mf-next-section">
+        <label style="margin-top:16px">
+          Hatua inayofuata
+
+          <input
+            name="next_action"
+            id="mf-touch-next-action"
+            maxlength="500"
+            value="${esc(prospect.next_action || '')}"
+            placeholder="Mfano: Kumtembelea kwa appointment"
+          >
+        </label>
+
+        <label>
+          Tarehe ya hatua inayofuata
+
+          <input
+            name="next_date"
+            id="mf-touch-next-date"
+            type="date"
+            value="${esc(prospect.next_date || '')}"
+          >
+        </label>
+      </div>
+
+      <p class="mf-page-note">
+        Amekabidhiwa kwa tathmini si idhini ya mkopo.
+        Manager pekee anaweza kufungua tena prospect
+        aliyefungwa au kukabidhiwa kwa tathmini.
+      </p>
+
+      <div class="modalactions">
+        <button
+          type="button"
+          class="outline"
+          data-action="close"
+        >
+          Ghairi
+        </button>
+
+        <button type="submit">
+          Hifadhi mawasiliano na hatua
+        </button>
+      </div>
+
+    </form>
+  `);
+
+  mfSyncFollowupFields();
+};
+
+/* Badilisha sehemu za fomu kulingana na hatua. */
+
+document.addEventListener('change', event => {
+  if (event.target.id === 'mf-touch-stage') {
+    mfSyncFollowupFields();
+  }
+});
+
+/* Hifadhi kupitia ruhusa na ukaguzi wa database. */
+
+document.addEventListener('submit', async event => {
+  const form = event.target;
+
+  if (form.getAttribute('id') !== 'mf-touch-form') return;
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  if (busy) return;
+
+  if (!sb || !mfOperate()) {
+    toast('Huna ruhusa ya kubadilisha prospect.');
+    return;
+  }
+
+  const values = Object.fromEntries(new FormData(form));
+
+  const {
+    prospect_id,
+    version,
+    ...changes
+  } = values;
+
+  const recordVersion = Number(version);
+
+  if (
+    !Number.isInteger(recordVersion) ||
+    recordVersion < 1
+  ) {
+    toast('Rekodi haijapakia vizuri. Funga na upakie upya.');
+    return;
+  }
+
+  busy = true;
+
+  const buttons = form.querySelectorAll('button');
+
+  buttons.forEach(button => {
+    button.disabled = true;
+  });
+
+  try {
+    const result = await sb.rpc('hub_mf_touch', {
+      p_id: prospect_id,
+      p_version: recordVersion,
+      p: changes
+    });
+
+    if (result.error) throw result.error;
+
+    busy = false;
+    closeDialog();
+
+    await mfFetch();
+
+    toast('Mawasiliano na hatua vimehifadhiwa.');
+
+  } catch (error) {
+    toast(mfErrorText(error));
+
+  } finally {
+    busy = false;
+
+    buttons.forEach(button => {
+      button.disabled = false;
+    });
+  }
+}, true);
+
+/* MWISHO WA CODE YA 10 */
   const initial=config();connect(SUPABASE_URL||initial.url,SUPABASE_ANON_KEY||initial.key);
 </script></body></html>
