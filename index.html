@@ -1378,5 +1378,859 @@ document.addEventListener('submit', async event => {
 
 /* MWISHO WA CODE YA 8 */
 
+/* =========================================
+   MICROFINANCE — ORODHA NA PIPELINE
+   CODE YA 9
+========================================= */
+
+const mfListStyles = document.createElement('style');
+
+mfListStyles.textContent = `
+  .mf-tabs,
+  .mf-filters,
+  .mf-pagination {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 20px 0;
+  }
+
+  .mf-tabs button,
+  .mf-pagination button {
+    font-size: 11px;
+  }
+
+  .mf-tabs .mf-selected {
+    background: #245e4b;
+    color: #fff;
+    border-color: #245e4b;
+  }
+
+  .mf-filters input,
+  .mf-filters select {
+    width: auto;
+    max-width: 230px;
+    margin: 0;
+    font-size: 11px;
+  }
+
+  .mf-result-count {
+    font-size: 11px;
+    color: #86998b;
+    margin-left: auto;
+  }
+
+  .mf-pipeline {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 15px;
+  }
+
+  .mf-column {
+    background: #edf3ef;
+    border: 1px solid #dfe8e1;
+    border-radius: 9px;
+    padding: 13px;
+    min-height: 170px;
+  }
+
+  .mf-column h3 {
+    font-size: 12px;
+    margin: 4px 0 15px;
+    line-height: 1.6;
+  }
+
+  .mf-prospect-card {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: #fff;
+    color: #385541;
+    border: 1px solid #dfe8e1;
+    padding: 13px;
+    margin: 9px 0;
+    font-size: 12px;
+    line-height: 1.7;
+  }
+
+  .mf-prospect-card small {
+    display: block;
+    font-size: 10px;
+    font-weight: 400;
+  }
+
+  .mf-stage-pill {
+    display: inline-block;
+    background: #eef4ef;
+    color: #64826c;
+    padding: 6px 8px;
+    border-radius: 5px;
+    font-size: 10px;
+  }
+
+  .mf-overdue {
+    color: #ac6c57;
+    font-weight: 600;
+  }
+
+  .mf-pagination {
+    justify-content: flex-end;
+    font-size: 11px;
+    color: #819389;
+  }
+
+  .mf-page-note {
+    font-size: 11px;
+    color: #8b9c90;
+    line-height: 1.8;
+    margin: 12px 0;
+  }
+
+  .mf-no-data {
+    padding: 22px;
+    color: #8fa294;
+    font-size: 12px;
+    text-align: center;
+  }
+
+  .mf-read-details {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    line-height: 1.8;
+    color: #6e8274;
+    font-size: 12px;
+  }
+
+  @media (max-width: 850px) {
+    .mf-pipeline {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 520px) {
+    .mf-pipeline {
+      grid-template-columns: 1fr;
+    }
+
+    .mf-filters input,
+    .mf-filters select {
+      width: 100%;
+      max-width: 100%;
+    }
+
+    .mf-pagination {
+      justify-content: center;
+    }
+
+    .mf-result-count {
+      margin-left: 0;
+    }
+  }
+`;
+
+document.head.appendChild(mfListStyles);
+
+
+/* Vitufe vya kubadilisha mwonekano. */
+
+function mfTabsHtml() {
+  const tabs = {
+    overview: 'Dashboard',
+    prospects: 'Prospects',
+    pipeline: 'Pipeline',
+    followups: 'Follow-ups za leo / zilizopita'
+  };
+
+  return `
+    <div class="mf-tabs">
+      ${Object.entries(tabs).map(([key, label]) => `
+        <button
+          type="button"
+          class="outline ${mfTab === key ? 'mf-selected' : ''}"
+          data-mf="tab"
+          data-tab="${key}"
+        >
+          ${esc(label)}
+        </button>
+      `).join('')}
+    </div>
+  `;
+}
+
+
+/* Search na filters.
+   Search inatafuta kwa jina kwenye database.
+*/
+
+function mfFiltersHtml() {
+  return `
+    <div class="mf-filters">
+
+      <input
+        id="mf-name-search"
+        aria-label="Tafuta prospect kwa jina"
+        placeholder="Tafuta kwa jina…"
+        value="${esc(mfName)}"
+      >
+
+      <select
+        id="mf-list-stage"
+        aria-label="Chuja hatua"
+      >
+        <option value="">Hatua zote</option>
+        ${options(MF_STAGE, mfStage)}
+      </select>
+
+      <select
+        id="mf-list-source"
+        aria-label="Chuja chanzo"
+      >
+        <option value="">Vyanzo vyote</option>
+        ${options(MF_SOURCE, mfSource)}
+      </select>
+
+      <span class="mf-result-count" role="status">
+        ${
+          mfFetching
+            ? 'Inapakia…'
+            : `${mfTotal} prospects kwenye filter hii`
+        }
+      </span>
+
+    </div>
+  `;
+}
+
+
+/* Pagination: rekodi 50 kwa ukurasa. */
+
+function mfPaginationHtml() {
+  const pages = Math.max(
+    1,
+    Math.ceil(mfTotal / 50)
+  );
+
+  return `
+    <div class="mf-pagination">
+
+      <button
+        class="outline"
+        data-mf="prev"
+        ${mfPage === 0 || mfFetching ? 'disabled' : ''}
+      >
+        ← Nyuma
+      </button>
+
+      <span>
+        Ukurasa ${mfPage + 1} / ${pages}
+        · hadi rekodi 50
+      </span>
+
+      <button
+        class="outline"
+        data-mf="next"
+        ${
+          (mfPage + 1) * 50 >= mfTotal || mfFetching
+            ? 'disabled'
+            : ''
+        }
+      >
+        Mbele →
+      </button>
+
+    </div>
+  `;
+}
+
+
+/* Orodha ya prospects. */
+
+function mfProspectTable() {
+  return `
+    <section class="panel">
+      <div class="tablewrap">
+        <table>
+
+          <thead>
+            <tr>
+              <th>PROSPECT</th>
+              <th>CHANZO / CAMPAIGN</th>
+              <th>MHUSIKA</th>
+              <th>HATUA</th>
+              <th>NEXT ACTION</th>
+              <th>TAREHE</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            ${mfRows.map(prospect => `
+              <tr>
+
+                <td>
+                  <button
+                    class="rowlink"
+                    data-mf="view"
+                    data-id="${prospect.id}"
+                  >
+                    ${esc(prospect.full_name)}
+                  </button>
+
+                  <small>
+                    ${esc(prospect.phone)}
+                    · ${esc(prospect.area)}
+                  </small>
+                </td>
+
+                <td>
+                  ${esc(
+                    MF_SOURCE[prospect.source] ||
+                    prospect.source
+                  )}
+
+                  <small>
+                    ${esc(prospect.campaign)}
+                  </small>
+                </td>
+
+                <td>
+                  ${esc(mfPerson(prospect.owner_id))}
+                </td>
+
+                <td>
+                  <span class="mf-stage-pill">
+                    ${esc(MF_STAGE[prospect.stage])}
+                  </span>
+                </td>
+
+                <td>
+                  ${esc(
+                    prospect.next_action ||
+                    prospect.closed_reason ||
+                    'Amekabidhiwa'
+                  )}
+                </td>
+
+                <td
+                  class="${
+                    prospect.next_date &&
+                    prospect.next_date < day()
+                      ? 'mf-overdue'
+                      : ''
+                  }"
+                >
+                  ${fmt(prospect.next_date)}
+                </td>
+
+              </tr>
+            `).join('') || `
+              <tr>
+                <td colspan="6">
+                  <div class="mf-no-data">
+                    Hakuna prospects kwenye filter hii.
+                  </div>
+                </td>
+              </tr>
+            `}
+          </tbody>
+
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+
+/* Pipeline ya kadi kwa kila hatua. */
+
+function mfPipelineHtml() {
+  return `
+    <div class="mf-pipeline">
+
+      ${Object.entries(MF_STAGE).map(([stage, label]) => {
+        const prospects = mfRows.filter(
+          prospect => prospect.stage === stage
+        );
+
+        return `
+          <section class="mf-column">
+
+            <h3>
+              ${esc(label)}
+              · ${prospects.length} kwenye ukurasa huu
+            </h3>
+
+            ${prospects.map(prospect => `
+              <button
+                class="mf-prospect-card"
+                data-mf="view"
+                data-id="${prospect.id}"
+              >
+                ${esc(prospect.full_name)}
+
+                <small>
+                  ${esc(
+                    prospect.area ||
+                    'Eneo halijawekwa'
+                  )}
+                </small>
+
+                <small>
+                  Mhusika:
+                  ${esc(mfPerson(prospect.owner_id))}
+                </small>
+
+                <small>
+                  ${esc(
+                    prospect.next_action ||
+                    prospect.closed_reason ||
+                    'Amekabidhiwa'
+                  )}
+                </small>
+
+                ${prospect.next_date ? `
+                  <small
+                    class="${
+                      prospect.next_date < day()
+                        ? 'mf-overdue'
+                        : ''
+                    }"
+                  >
+                    ${fmt(prospect.next_date)}
+                  </small>
+                ` : ''}
+
+              </button>
+            `).join('') || `
+              <p class="mf-no-data">
+                Hakuna kwenye ukurasa huu.
+              </p>
+            `}
+
+          </section>
+        `;
+      }).join('')}
+
+    </div>
+  `;
+}
+
+
+/* Panua dashboard ya Code ya 7 bila kuiondoa. */
+
+const mfDashboardBeforeLists = mfRender;
+
+mfRender = function() {
+  if (!mfAllowed()) {
+    return;
+  }
+
+  if (
+    !mfOperate() ||
+    mfError ||
+    !mfSummary
+  ) {
+    mfDashboardBeforeLists();
+    return;
+  }
+
+  if (mfTab === 'overview') {
+    mfDashboardBeforeLists();
+
+    $('#pagebody')?.insertAdjacentHTML(
+      'afterbegin',
+      mfTabsHtml()
+    );
+
+    return;
+  }
+
+  const container = $('#pagebody');
+
+  if (!container) {
+    return;
+  }
+
+  container.innerHTML = `
+    ${mfTabsHtml()}
+
+    <p class="mf-page-note">
+      ${
+        mfManager()
+          ? 'Unaona prospects wote wa Microfinance.'
+          : 'Unaona prospects ulizokabidhiwa pekee.'
+      }
+
+      ${
+        mfTab === 'followups'
+          ? 'Hapa kuna follow-ups za leo na zilizochelewa pekee.'
+          : ''
+      }
+    </p>
+
+    ${mfFiltersHtml()}
+
+    ${
+      mfTab === 'pipeline'
+        ? mfPipelineHtml()
+        : mfProspectTable()
+    }
+
+    ${mfPaginationHtml()}
+
+    <p class="mf-page-note">
+      ${
+        mfTab === 'pipeline'
+          ? 'Pipeline inaonyesha rekodi za ukurasa huu tu. Tumia Nyuma / Mbele kuona zilizobaki.'
+          : 'Bonyeza jina la prospect kuona maelezo na historia yake.'
+      }
+    </p>
+  `;
+};
+
+
+/* Kufungua maelezo na historia ya prospect.
+   Kwa hatua hii maelezo yanaonekana tu.
+*/
+
+async function mfViewProspect(id) {
+  if (!mfOperate()) {
+    return;
+  }
+
+  const prospect = mfRows.find(
+    item => item.id === id
+  );
+
+  if (!prospect) {
+    return;
+  }
+
+  const token = ++mfDetailToken;
+  const actorId = me.id;
+
+  dialog(`
+    <div class="modalhead">
+      <h2>Inapakia prospect…</h2>
+
+      <button
+        class="iconbtn"
+        data-action="close"
+      >
+        ✕
+      </button>
+    </div>
+  `);
+
+  try {
+    const result = await sb
+      .from('hub_mf_contacts')
+      .select('*')
+      .eq('prospect_id', id)
+      .order('occurred_at', { ascending: false })
+      .limit(100);
+
+    if (result.error) {
+      throw result.error;
+    }
+
+    if (
+      token !== mfDetailToken ||
+      !$('#modal').open ||
+      !mfOperate() ||
+      me.id !== actorId
+    ) {
+      return;
+    }
+
+    const linkedTask = items.find(
+      item => item.id === prospect.related_task
+    );
+
+    $('#modal-body').innerHTML = `
+      <div class="modalhead">
+        <div>
+          <span class="eyebrow">
+            MICROFINANCE / PROSPECT
+          </span>
+
+          <h2 id="dialog-title">
+            ${esc(prospect.full_name)}
+          </h2>
+        </div>
+
+        <button
+          class="iconbtn"
+          data-action="close"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div class="detailbody">
+
+        <span class="mf-stage-pill">
+          ${esc(MF_STAGE[prospect.stage])}
+        </span>
+
+        <dl>
+          <div>
+            <dt>Simu</dt>
+            <dd>${esc(prospect.phone)}</dd>
+          </div>
+
+          <div>
+            <dt>Mhusika</dt>
+            <dd>${esc(mfPerson(prospect.owner_id))}</dd>
+          </div>
+
+          <div>
+            <dt>Eneo</dt>
+            <dd>${esc(prospect.area || '—')}</dd>
+          </div>
+
+          <div>
+            <dt>Shughuli</dt>
+            <dd>${esc(prospect.business || '—')}</dd>
+          </div>
+
+          <div>
+            <dt>Chanzo</dt>
+            <dd>${esc(MF_SOURCE[prospect.source])}</dd>
+          </div>
+
+          <div>
+            <dt>Campaign</dt>
+            <dd>${esc(prospect.campaign || '—')}</dd>
+          </div>
+
+          <div>
+            <dt>Next action</dt>
+            <dd>${esc(prospect.next_action || '—')}</dd>
+          </div>
+
+          <div>
+            <dt>Tarehe</dt>
+            <dd>${fmt(prospect.next_date)}</dd>
+          </div>
+
+          <div>
+            <dt>Kazi ya outreach</dt>
+            <dd>
+              ${esc(linkedTask?.title || 'Haijaunganishwa')}
+            </dd>
+          </div>
+
+          <div>
+            <dt>Sababu ya kufungwa</dt>
+            <dd>${esc(prospect.closed_reason || '—')}</dd>
+          </div>
+        </dl>
+
+        <h3>Hitaji la huduma</h3>
+
+        <p class="mf-read-details">
+          ${esc(prospect.need || 'Halijawekwa.')}
+        </p>
+
+        <h3 class="historytitle">
+          Historia ya mawasiliano
+        </h3>
+
+        <div class="timeline">
+          ${(result.data || []).map(entry => `
+            <div>
+              <span class="eventdot"></span>
+
+              <div>
+                <b>${esc(entry.note)}</b>
+
+                <small>
+                  ${esc(entry.actor_name)}
+                  · ${esc(entry.activity_type)}
+                  · ${fmt(entry.occurred_at)}
+                </small>
+              </div>
+            </div>
+          `).join('') || `
+            <p class="mf-no-data">
+              Hakuna historia bado.
+            </p>
+          `}
+        </div>
+
+      </div>
+    `;
+
+  } catch (error) {
+    if (
+      token === mfDetailToken &&
+      $('#modal').open
+    ) {
+      $('#modal-body').innerHTML = `
+        <div class="modalhead">
+          <h2>Haijapakia</h2>
+
+          <button
+            class="iconbtn"
+            data-action="close"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div class="detailbody">
+          ${esc(mfErrorText(error))}
+        </div>
+      `;
+    }
+  }
+}
+
+
+/* Tabs, pagination na kufungua prospect. */
+
+document.addEventListener('click', async event => {
+  const button = event.target.closest('[data-mf]');
+
+  if (!button) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  if (busy || !mfOperate()) {
+    return;
+  }
+
+  const action = button.dataset.mf;
+
+  if (action !== 'view' && mfFetching) {
+    return;
+  }
+
+  clearTimeout(mfSearchTimer);
+
+  try {
+    if (action === 'tab') {
+      mfTab = button.dataset.tab;
+      mfDue = mfTab === 'followups';
+
+      mfStage = '';
+      mfSource = '';
+      mfName = '';
+      mfPage = 0;
+
+      render();
+
+      await mfFetch();
+
+    } else if (
+      action === 'prev' &&
+      mfPage > 0
+    ) {
+      mfPage--;
+
+      await mfFetch();
+
+    } else if (
+      action === 'next' &&
+      (mfPage + 1) * 50 < mfTotal
+    ) {
+      mfPage++;
+
+      await mfFetch();
+
+    } else if (action === 'view') {
+      await mfViewProspect(button.dataset.id);
+    }
+
+  } catch (error) {
+    toast(mfErrorText(error));
+  }
+
+}, true);
+
+
+/* Filters za hatua na chanzo. */
+
+document.addEventListener('change', async event => {
+  const target = event.target;
+
+  if (![
+    'mf-list-stage',
+    'mf-list-source'
+  ].includes(target.id)) {
+    return;
+  }
+
+  if (!mfOperate()) {
+    return;
+  }
+
+  clearTimeout(mfSearchTimer);
+
+  if (target.id === 'mf-list-stage') {
+    mfStage = target.value;
+  } else {
+    mfSource = target.value;
+  }
+
+  mfPage = 0;
+
+  await mfFetch();
+});
+
+
+/* Search inasubiri muda mfupi baada ya kuandika. */
+
+document.addEventListener('input', event => {
+  if (
+    event.target.id !== 'mf-name-search' ||
+    !mfOperate()
+  ) {
+    return;
+  }
+
+  mfName = event.target.value;
+  mfPage = 0;
+
+  clearTimeout(mfSearchTimer);
+
+  mfSearchTimer = setTimeout(async () => {
+    if (
+      page !== 'clients' ||
+      !mfOperate()
+    ) {
+      return;
+    }
+
+    const position =
+      $('#mf-name-search')?.selectionStart;
+
+    await mfFetch();
+
+    const field = $('#mf-name-search');
+
+    if (
+      field &&
+      page === 'clients' &&
+      !$('#modal').open
+    ) {
+      field.focus();
+
+      field.setSelectionRange(
+        position ?? mfName.length,
+        position ?? mfName.length
+      );
+    }
+
+  }, 450);
+});
+
+
+/* MWISHO WA CODE YA 9 */
+
   const initial=config();connect(SUPABASE_URL||initial.url,SUPABASE_ANON_KEY||initial.key);
 </script></body></html>
