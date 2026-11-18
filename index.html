@@ -3640,6 +3640,366 @@ document.addEventListener('submit', async event => {
 }, true);
 
 /* MWISHO WA LEONIX CODE YA 5 */
+
+/* LEONIX — CODE YA 6 */
+
+let lxDetailToken = 0;
+
+const lxAmount = value =>
+  new Intl.NumberFormat('en-TZ', {
+    style: 'currency',
+    currency: 'TZS',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(Number(value) || 0);
+
+/* Fanya majina ya tenders yawe buttons. */
+
+const lxPageBeforeDetails = lxRenderPage;
+
+lxRenderPage = function() {
+  lxPageBeforeDetails();
+
+  if (
+    page !== 'leonix-supply' ||
+    !lxAllowed() ||
+    lxFetching ||
+    lxError
+  ) return;
+
+  const rows = document.querySelectorAll(
+    '#pagebody table tbody tr'
+  );
+
+  rows.forEach((row, index) => {
+    const tender = lxRows[index];
+    const heading = row.querySelector('td strong');
+
+    if (!tender || !heading) return;
+
+    const button = document.createElement('button');
+
+    button.type = 'button';
+    button.className = 'rowlink';
+    button.dataset.lxView = tender.id;
+    button.textContent = tender.title;
+
+    heading.replaceWith(button);
+  });
+};
+
+/* Pakia taarifa mpya moja kwa moja kutoka database. */
+
+async function lxViewTender(id) {
+  if (!sb || !lxAllowed()) return;
+
+  const actor = lxActorKey();
+  const token = ++lxDetailToken;
+  const client = sb;
+
+  dialog(`
+    <div class="modalhead">
+      <div>
+        <span class="eyebrow">LEONIX / TENDER</span>
+        <h2>Taarifa za tender</h2>
+      </div>
+
+      <button class="iconbtn" data-action="close"
+        aria-label="Funga">✕</button>
+    </div>
+
+    <div class="detailbody"
+      id="lx-detail-content"
+      data-token="${token}">
+      <p>Inapakia taarifa na bidhaa…</p>
+    </div>
+  `);
+
+  function currentSlot() {
+    const slot = $('#lx-detail-content');
+
+    if (
+      token !== lxDetailToken ||
+      actor !== lxActorKey() ||
+      client !== sb ||
+      !lxAllowed() ||
+      !$('#modal').open ||
+      slot?.dataset.token !== String(token)
+    ) return null;
+
+    return slot;
+  }
+
+  try {
+    const results = await Promise.all([
+      client
+        .from('hub_leonix_tenders')
+        .select('*')
+        .eq('id', id)
+        .single(),
+
+      client
+        .from('hub_leonix_tender_items')
+        .select('*')
+        .eq('tender_id', id)
+        .order('line_number'),
+
+      client
+        .from('hub_leonix_tender_events')
+        .select('*')
+        .eq('tender_id', id)
+        .order('occurred_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(100)
+    ]);
+
+    const slot = currentSlot();
+    if (!slot) return;
+
+    results.forEach(result => {
+      if (result.error) throw result.error;
+    });
+
+    const tender = results[0].data;
+    const products = results[1].data || [];
+    const history = results[2].data || [];
+
+    const completeCosts =
+      products.length > 0 &&
+      products.every(item => item.estimated_unit_cost != null);
+
+    const completePrices =
+      products.length > 0 &&
+      products.every(item => item.quoted_unit_price != null);
+
+    const estimatedCost = products.reduce(
+      (sum, item) =>
+        sum +
+        Number(item.quantity) *
+        Number(item.estimated_unit_cost || 0),
+      0
+    );
+
+    const quotedTotal = products.reduce(
+      (sum, item) =>
+        sum +
+        Number(item.quantity) *
+        Number(item.quoted_unit_price || 0),
+      0
+    );
+
+    $('#dialog-title').textContent = tender.title;
+
+    slot.innerHTML = `
+      <span class="rolepill">
+        ${esc(LX_STATUS[tender.status] || tender.status)}
+      </span>
+
+      <dl>
+        <div>
+          <dt>Taasisi / mteja</dt>
+          <dd>${esc(tender.client_name)}</dd>
+        </div>
+
+        <div>
+          <dt>Namba ya tender</dt>
+          <dd>${esc(tender.tender_number || '—')}</dd>
+        </div>
+
+        <div>
+          <dt>Mawasiliano</dt>
+          <dd>${esc(tender.client_contact || '—')}</dd>
+        </div>
+
+        <div>
+          <dt>Eneo la delivery</dt>
+          <dd>${esc(tender.delivery_location || '—')}</dd>
+        </div>
+
+        <div>
+          <dt>Mhusika</dt>
+          <dd>${esc(person(tender.owner_id))}</dd>
+        </div>
+
+        <div>
+          <dt>Deadline — saa za Tanzania</dt>
+          <dd>${tender.submission_deadline
+            ? esc(new Date(
+                tender.submission_deadline
+              ).toLocaleString('en-GB', {
+                timeZone: 'Africa/Nairobi',
+                dateStyle: 'medium',
+                timeStyle: 'short'
+              }))
+            : '—'
+          }</dd>
+        </div>
+
+        <div>
+          <dt>Hatua inayofuata</dt>
+          <dd>${esc(tender.next_action || '—')}</dd>
+        </div>
+
+        <div>
+          <dt>Tarehe ya follow-up</dt>
+          <dd>${fmt(tender.next_followup_date)}</dd>
+        </div>
+      </dl>
+
+      <h3>Maelezo ya tender</h3>
+
+      <p style="white-space:pre-wrap;overflow-wrap:anywhere"
+      >${esc(tender.description || 'Hakuna maelezo ya ziada.')}</p>
+
+      <h3 style="margin-top:24px">Bidhaa za tender</h3>
+
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>BIDHAA</th>
+              <th>QTY / UNIT</th>
+              <th>GHARAMA / UNIT</th>
+              <th>BEI / UNIT</th>
+              <th>JUMLA YA BEI</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            ${products.map(item => `
+              <tr>
+                <td>
+                  <strong>${esc(item.item_name)}</strong>
+
+                  <small style="white-space:pre-wrap"
+                  >${esc(item.specification || '')}</small>
+                </td>
+
+                <td>
+                  ${esc(item.quantity)} ${esc(item.unit)}
+                </td>
+
+                <td>
+                  ${item.estimated_unit_cost == null
+                    ? 'Haijawekwa'
+                    : lxAmount(item.estimated_unit_cost)}
+                </td>
+
+                <td>
+                  ${item.quoted_unit_price == null
+                    ? 'Haijawekwa'
+                    : lxAmount(item.quoted_unit_price)}
+                </td>
+
+                <td>
+                  ${item.quoted_unit_price == null
+                    ? '—'
+                    : lxAmount(
+                        Number(item.quantity) *
+                        Number(item.quoted_unit_price)
+                      )}
+                </td>
+              </tr>
+            `).join('') || `
+              <tr>
+                <td colspan="5">Hakuna bidhaa zilizopakiwa.</td>
+              </tr>
+            `}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="notice small" style="margin-top:20px">
+        <div>
+          <p>
+            <strong>Gharama za bidhaa kwa makadirio:</strong>
+            ${completeCosts
+              ? lxAmount(estimatedCost)
+              : 'Bado hazijakamilika'}
+          </p>
+
+          <p>
+            <strong>Jumla ya bei za bidhaa:</strong>
+            ${completePrices
+              ? lxAmount(quotedTotal)
+              : 'Bado haijakamilika'}
+          </p>
+
+          <p>
+            Hesabu hizi zinatokana na quantity × bei ya unit.
+            VAT na gharama nyingine hazijaongezwa na mfumo.
+            Hii si hesabu ya faida halisi.
+          </p>
+        </div>
+      </div>
+
+      ${tender.outcome_note ? `
+        <h3>Maelezo ya matokeo</h3>
+        <p style="white-space:pre-wrap"
+        >${esc(tender.outcome_note)}</p>
+      ` : ''}
+
+      <h3 class="historytitle">Historia ya tender</h3>
+
+      <p class="muted">
+        Matukio hadi 100 ya karibuni.
+      </p>
+
+      ${history.map(entry => `
+        <div style="border-bottom:1px solid #e5ebe7;
+                    padding:14px 0">
+          <strong>${esc(person(entry.actor_id))}</strong>
+
+          <p style="white-space:pre-wrap;overflow-wrap:anywhere"
+          >${esc(entry.note)}</p>
+
+          <small class="muted">
+            ${esc(new Date(entry.occurred_at).toLocaleString(
+              'en-GB', {
+                timeZone: 'Africa/Nairobi',
+                dateStyle: 'medium',
+                timeStyle: 'short'
+              }
+            ))}
+
+            ${entry.new_status
+              ? ' · ' + esc(
+                  LX_STATUS[entry.new_status] || entry.new_status
+                )
+              : ''}
+          </small>
+        </div>
+      `).join('') || '<p>Hakuna historia iliyopakiwa.</p>'}
+    `;
+
+  } catch (error) {
+    const slot = currentSlot();
+
+    if (slot) {
+      slot.innerHTML = `
+        <h3>Taarifa hazijapakia</h3>
+        <p>${esc(errorText(error))}</p>
+        <p>Funga dirisha kisha fungua tender tena.</p>
+      `;
+    }
+  }
+}
+
+/* Fungua tender kwa kubonyeza jina lake. */
+
+document.addEventListener('click', async event => {
+  const button = event.target.closest('[data-lx-view]');
+  if (!button) return;
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  if (busy || !lxAllowed()) return;
+
+  await lxViewTender(button.dataset.lxView);
+}, true);
+
+/* MWISHO WA LEONIX CODE YA 6 */
   
   const initial=config();connect(SUPABASE_URL||initial.url,SUPABASE_ANON_KEY||initial.key);
 </script></body></html>
