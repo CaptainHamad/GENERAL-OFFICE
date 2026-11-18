@@ -3270,6 +3270,376 @@ document.addEventListener('change', async event => {
 });
 
 /* MWISHO WA LEONIX CODE YA 4 */
+
+/* LEONIX — CODE YA 5 */
+
+function lxOwners() {
+  return members.filter(member =>
+    member.active &&
+    String(member.company).toLowerCase() === 'leonix' &&
+    ['manager', 'lead'].includes(member.role)
+  );
+}
+
+function lxItemFields() {
+  return `
+    <fieldset data-lx-item-row
+      style="border:1px solid #dde5e1;border-radius:10px;
+             padding:16px;margin:16px 0">
+
+      <div class="formrow">
+        <label>
+          Jina la bidhaa
+          <input data-field="item_name"
+            maxlength="200" required
+            placeholder="Mfano: Mabati">
+        </label>
+
+        <label>
+          Unit
+          <input data-field="unit"
+            maxlength="40" required
+            placeholder="Mfano: pcs, kg, bags">
+        </label>
+      </div>
+
+      <label>
+        Specifications
+        <textarea data-field="specification"
+          maxlength="2000" rows="2"
+          placeholder="Aina, ukubwa, brand au ubora unaohitajika"></textarea>
+      </label>
+
+      <div class="formrow">
+        <label>
+          Quantity
+          <input data-field="quantity"
+            type="number" min="0.001" step="0.001"
+            required placeholder="0">
+        </label>
+
+        <label>
+          Gharama ya kununua kwa unit — hiari
+          <input data-field="estimated_unit_cost"
+            type="number" min="0" step="0.01"
+            placeholder="TZS">
+        </label>
+      </div>
+
+      <label>
+        Bei ya kuuza kwa unit — hiari
+        <input data-field="quoted_unit_price"
+          type="number" min="0" step="0.01"
+          placeholder="TZS">
+      </label>
+
+      <button type="button" class="outline"
+        data-lx-item-action="remove"
+        style="margin-top:12px">
+        Ondoa bidhaa hii
+      </button>
+    </fieldset>
+  `;
+}
+
+function lxNewTender() {
+  if (!lxOperate()) {
+    toast('Usajili wa tender unafanywa na timu ya LEONIX.');
+    return;
+  }
+
+  const isManager = me.role === 'manager';
+
+  dialog(`
+    <div class="modalhead">
+      <div>
+        <span class="eyebrow">LEONIX / TENDER MPYA</span>
+        <h2>Sajili tender</h2>
+      </div>
+
+      <button class="iconbtn" data-action="close"
+        aria-label="Funga">✕</button>
+    </div>
+
+    <form id="lx-create-tender-form">
+
+      <label>
+        Jina la tender
+        <input name="title" minlength="3"
+          maxlength="200" required
+          placeholder="Mfano: Supply ya vifaa vya ujenzi">
+      </label>
+
+      <div class="formrow">
+        <label>
+          Namba ya tender — hiari
+          <input name="tender_number" maxlength="120">
+        </label>
+
+        <label>
+          Taasisi / mteja
+          <input name="client_name" minlength="2"
+            maxlength="200" required>
+        </label>
+      </div>
+
+      <label>
+        Mawasiliano ya taasisi — hiari
+        <input name="client_contact" maxlength="200"
+          placeholder="Jina la mhusika, simu au email">
+      </label>
+
+      <label>
+        Eneo la delivery — hiari
+        <input name="delivery_location" maxlength="250">
+      </label>
+
+      <label>
+        Maelezo ya tender
+        <textarea name="description" rows="3"
+          maxlength="5000"></textarea>
+      </label>
+
+      <label>
+        Deadline ya kuwasilisha — saa za Tanzania
+        <input name="submission_deadline"
+          type="datetime-local">
+      </label>
+
+      ${isManager ? `
+        <label>
+          Mhusika wa kusimamia
+          <select name="owner_id" required>
+            <option value="">Chagua mhusika</option>
+            ${lxOwners().map(member => `
+              <option value="${esc(member.id)}"
+                ${member.id === me.id ? 'selected' : ''}>
+                ${esc(member.full_name || member.email)}
+              </option>
+            `).join('')}
+          </select>
+        </label>
+      ` : `
+        <p class="muted">
+          Mhusika: ${esc(me.full_name || me.email)}
+        </p>
+      `}
+
+      <div class="formrow">
+        <label>
+          Hatua inayofuata
+          <input name="next_action" maxlength="500"
+            placeholder="Mfano: Kutafuta bei kwa suppliers">
+        </label>
+
+        <label>
+          Tarehe ya kufuatilia
+          <input name="next_followup_date" type="date">
+        </label>
+      </div>
+
+      <h3 style="margin-top:24px">Bidhaa za tender</h3>
+
+      <p class="muted">
+        Quantity na unit ni lazima. Unaweza kuacha bei
+        wazi ikiwa bado unafanya utafiti wa gharama.
+        Bei hizi ni za bidhaa pekee; VAT na gharama
+        za delivery hazijaongezwa hapa.
+      </p>
+
+      <div id="lx-tender-item-list">
+        ${lxItemFields()}
+      </div>
+
+      <button type="button" class="outline"
+        data-lx-item-action="add">
+        ＋ Ongeza bidhaa
+      </button>
+
+      <p class="muted" style="margin-top:20px">
+        Tender itahifadhiwa kama Draft.
+        Hii si idhini ya kuwasilisha tender au kufanya ununuzi.
+      </p>
+
+      <div class="modalactions">
+        <button type="button" class="outline"
+          data-action="close">
+          Ghairi
+        </button>
+
+        <button type="submit">
+          Hifadhi tender
+        </button>
+      </div>
+
+    </form>
+  `);
+}
+
+/* Kitufe kinaonekana kwa Manager / Kiongozi wa LEONIX. */
+
+const lxRenderBeforeCreate = render;
+
+render = function() {
+  lxRenderBeforeCreate();
+
+  if (page !== 'leonix-supply' || !lxOperate()) return;
+
+  const buttons = $('.pagehead .headbuttons');
+
+  if (buttons && !buttons.querySelector('[data-lx-create]')) {
+    buttons.insertAdjacentHTML('beforeend', `
+      <button type="button" data-lx-create>
+        ＋ Tender mpya
+      </button>
+    `);
+  }
+};
+
+/* Fungua fomu, ongeza au ondoa bidhaa. */
+
+document.addEventListener('click', event => {
+  const create = event.target.closest('[data-lx-create]');
+  const itemAction = event.target.closest(
+    '[data-lx-item-action]'
+  );
+
+  if (!create && !itemAction) return;
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  if (busy || !lxOperate()) return;
+
+  if (create) {
+    lxNewTender();
+    return;
+  }
+
+  const form = itemAction.closest('#lx-create-tender-form');
+  if (!form) return;
+
+  const list = form.querySelector('#lx-tender-item-list');
+  const rows = list.querySelectorAll('[data-lx-item-row]');
+
+  if (itemAction.dataset.lxItemAction === 'add') {
+    if (rows.length >= 100) {
+      toast('Tender moja inaweza kuwa na bidhaa hadi 100.');
+      return;
+    }
+
+    list.insertAdjacentHTML('beforeend', lxItemFields());
+
+    list.lastElementChild
+      .querySelector('[data-field="item_name"]')
+      .focus();
+
+  } else if (itemAction.dataset.lxItemAction === 'remove') {
+    if (rows.length <= 1) {
+      toast('Tender lazima iwe na angalau bidhaa moja.');
+      return;
+    }
+
+    itemAction.closest('[data-lx-item-row]').remove();
+  }
+}, true);
+
+/* Hifadhi tender na bidhaa zake kupitia database function. */
+
+document.addEventListener('submit', async event => {
+  const form = event.target;
+
+  if (form.getAttribute('id') !== 'lx-create-tender-form') {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  if (busy) return;
+
+  if (!sb || !lxOperate()) {
+    toast('Huna ruhusa ya kusajili tender.');
+    return;
+  }
+
+  if (!form.reportValidity()) return;
+
+  const payload = Object.fromEntries(new FormData(form));
+
+  /*
+   * datetime-local haina timezone.
+   * Weka +03:00 ili deadline ihifadhiwe kwa saa za Tanzania.
+   */
+  payload.submission_deadline = payload.submission_deadline
+    ? payload.submission_deadline + ':00+03:00'
+    : null;
+
+  if (me.role === 'lead') {
+    payload.owner_id = me.id;
+  }
+
+  payload.items = Array.from(
+    form.querySelectorAll('[data-lx-item-row]')
+  ).map(row => {
+    const item = {};
+
+    row.querySelectorAll('[data-field]').forEach(input => {
+      item[input.dataset.field] = input.value.trim();
+    });
+
+    return item;
+  });
+
+  if (
+    payload.items.length < 1 ||
+    payload.items.length > 100
+  ) {
+    toast('Weka bidhaa 1 hadi 100.');
+    return;
+  }
+
+  const actor = lxActorKey();
+
+  busy = true;
+
+  const controls = form.querySelectorAll('button');
+  controls.forEach(button => button.disabled = true);
+
+  try {
+    const result = await sb.rpc(
+      'hub_leonix_create_tender',
+      { p: payload }
+    );
+
+    if (result.error) throw result.error;
+
+    if (!result.data) {
+      throw new Error('Database haijarudisha namba ya rekodi.');
+    }
+
+    busy = false;
+    closeDialog();
+
+    if (actor === lxActorKey() && lxAllowed()) {
+      lxStatus = '';
+      lxPage = 0;
+
+      await lxFetch();
+
+      toast('Tender na bidhaa zake zimehifadhiwa kama Draft.');
+    }
+
+  } catch (error) {
+    toast(errorText(error));
+
+  } finally {
+    busy = false;
+    controls.forEach(button => button.disabled = false);
+  }
+}, true);
+
+/* MWISHO WA LEONIX CODE YA 5 */
   
   const initial=config();connect(SUPABASE_URL||initial.url,SUPABASE_ANON_KEY||initial.key);
 </script></body></html>
