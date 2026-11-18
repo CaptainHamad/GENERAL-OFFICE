@@ -2842,6 +2842,434 @@ document.addEventListener('click', event => {
 }, true);
 
 /* MWISHO WA CODE YA 11 */
+
+/* LEONIX — CODE YA 4 */
+
+const LX_STATUS = {
+  draft: 'Draft',
+  preparing: 'Inaandaliwa',
+  pending_gm: 'Inasubiri GM',
+  pending_directors: 'Inasubiri Directors',
+  approved: 'Imeidhinishwa',
+  submitted: 'Imewasilishwa',
+  won: 'Imepatikana',
+  lost: 'Haijapatikana',
+  cancelled: 'Imefutwa'
+};
+
+let lxRows = [];
+let lxTotal = 0;
+let lxPage = 0;
+let lxStatus = '';
+let lxFetching = false;
+let lxError = '';
+let lxEpoch = 0;
+let lxActor = '';
+
+function lxAllowed() {
+  return Boolean(
+    me?.active &&
+    (
+      ['director', 'gm'].includes(me.role) ||
+      (
+        String(me.company).toLowerCase() === 'leonix' &&
+        ['manager', 'lead'].includes(me.role)
+      )
+    )
+  );
+}
+
+function lxOperate() {
+  return Boolean(
+    me?.active &&
+    String(me.company).toLowerCase() === 'leonix' &&
+    ['manager', 'lead'].includes(me.role)
+  );
+}
+
+function lxActorKey() {
+  return [
+    me?.id,
+    me?.role,
+    me?.company,
+    me?.active
+  ].join('|');
+}
+
+function lxReset() {
+  lxEpoch++;
+  lxRows = [];
+  lxTotal = 0;
+  lxPage = 0;
+  lxStatus = '';
+  lxFetching = false;
+  lxError = '';
+  lxActor = '';
+}
+
+/* Ongeza menu. */
+
+if (!NAV.some(entry => entry[0] === 'leonix-supply')) {
+  NAV.splice(
+    NAV.length - 1,
+    0,
+    ['leonix-supply', 'LEONIX — Tenders & Supply', '▣']
+  );
+}
+
+/* Pakia ukurasa mmoja: tenders 25. */
+
+async function lxFetch() {
+  if (!sb || !lxAllowed()) return;
+
+  const actor = lxActorKey();
+
+  if (lxActor !== actor) {
+    lxReset();
+    lxActor = actor;
+  }
+
+  const token = ++lxEpoch;
+  const client = sb;
+
+  lxFetching = true;
+  lxError = '';
+
+  if (page === 'leonix-supply') render();
+
+  try {
+    let query = client
+      .from('hub_leonix_tenders')
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(lxPage * 25, lxPage * 25 + 24);
+
+    if (lxStatus) {
+      query = query.eq('status', lxStatus);
+    }
+
+    const result = await query;
+
+    if (
+      token !== lxEpoch ||
+      actor !== lxActorKey() ||
+      client !== sb ||
+      !lxAllowed()
+    ) return;
+
+    if (result.error) throw result.error;
+
+    lxRows = result.data || [];
+    lxTotal = result.count || 0;
+
+  } catch (error) {
+    if (
+      token !== lxEpoch ||
+      actor !== lxActorKey()
+    ) return;
+
+    lxRows = [];
+    lxTotal = 0;
+    lxError = errorText(error);
+
+  } finally {
+    if (
+      token === lxEpoch &&
+      actor === lxActorKey()
+    ) {
+      lxFetching = false;
+
+      if (page === 'leonix-supply') render();
+    }
+  }
+}
+
+function lxRenderPage() {
+  const body = $('#pagebody');
+  if (!body) return;
+
+  const pages = Math.max(1, Math.ceil(lxTotal / 25));
+
+  let content;
+
+  if (lxError) {
+    content = `
+      <div class="empty">
+        <h3>Taarifa hazijapakia</h3>
+        <p>${esc(lxError)}</p>
+        <button class="outline" data-lx="refresh">
+          Jaribu tena
+        </button>
+      </div>
+    `;
+
+  } else if (lxFetching) {
+    content = `
+      <div class="empty">
+        <h3>Inapakia tenders…</h3>
+      </div>
+    `;
+
+  } else if (!lxRows.length) {
+    content = `
+      <div class="empty">
+        <h3>Hakuna tenders kwenye orodha hii</h3>
+        <p>
+          ${lxStatus
+            ? 'Badilisha hatua uliyochagua ili kuona tenders nyingine.'
+            : 'Tenders zilizosajiliwa na unazoruhusiwa kuona zitaonekana hapa.'}
+        </p>
+      </div>
+    `;
+
+  } else {
+    content = `
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>TENDER / TAASISI</th>
+              <th>NAMBA YA TENDER</th>
+              <th>MHUSIKA</th>
+              <th>DEADLINE</th>
+              <th>HATUA</th>
+              <th>FOLLOW-UP</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            ${lxRows.map(tender => `
+              <tr>
+                <td>
+                  <strong>${esc(tender.title)}</strong>
+                  <small>${esc(tender.client_name)}</small>
+                </td>
+
+                <td>
+                  ${esc(tender.tender_number || '—')}
+                </td>
+
+                <td>
+                  ${esc(person(tender.owner_id))}
+                </td>
+
+                <td>
+                  ${fmt(tender.submission_deadline)}
+                </td>
+
+                <td>
+                  <span class="rolepill">
+                    ${esc(
+                      LX_STATUS[tender.status] || tender.status
+                    )}
+                  </span>
+                </td>
+
+                <td>
+                  ${fmt(tender.next_followup_date)}
+                  <small>${esc(tender.next_action || '—')}</small>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  body.innerHTML = `
+    <div class="notice small">
+      Sehemu hii inafuatilia tenders za LEONIX.
+      Tender iliyopatikana itaunganishwa na supply order
+      kwenye hatua ya utekelezaji.
+    </div>
+
+    <section class="panel">
+      <div class="panelhead">
+        <h2>
+          Tenders
+          <span class="count">
+            ${lxFetching ? '…' : lxTotal}
+          </span>
+        </h2>
+
+        <select
+          id="lx-status-filter"
+          aria-label="Chuja hatua ya tender"
+          ${lxFetching ? 'disabled' : ''}
+        >
+          <option value="">Hatua zote</option>
+          ${options(LX_STATUS, lxStatus)}
+        </select>
+      </div>
+
+      ${content}
+
+      <div class="panelhead">
+        <span class="muted">
+          Ukurasa ${lxPage + 1} kati ya ${pages}
+          · Tenders 25 kwa ukurasa
+        </span>
+
+        <div class="headbuttons">
+          <button
+            class="outline"
+            data-lx="prev"
+            ${lxFetching || lxPage === 0 ? 'disabled' : ''}
+          >
+            ← Nyuma
+          </button>
+
+          <button
+            class="outline"
+            data-lx="next"
+            ${lxFetching || lxPage + 1 >= pages ? 'disabled' : ''}
+          >
+            Mbele →
+          </button>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+/* Unganisha ukurasa na render iliyopo. */
+
+const lxRenderBeforeModule = render;
+
+render = function() {
+  if (
+    page === 'leonix-supply' &&
+    !lxAllowed()
+  ) {
+    page = 'dashboard';
+  }
+
+  lxRenderBeforeModule();
+
+  if (!lxAllowed()) {
+    document.querySelectorAll(
+      '[data-action="nav"][data-page="leonix-supply"]'
+    ).forEach(button => button.remove());
+
+    return;
+  }
+
+  if (page !== 'leonix-supply') return;
+
+  const heading = $('.pagehead h1');
+  const description = $('.pagehead p');
+  const buttons = $('.pagehead .headbuttons');
+  const filters = $('.filterbar');
+
+  if (heading) {
+    heading.textContent = 'LEONIX — Tenders & Supply';
+  }
+
+  if (description) {
+    description.textContent =
+      'Fuatilia tenders, deadlines, wahusika na hatua za maamuzi.';
+  }
+
+  if (filters) filters.hidden = true;
+
+  if (buttons) {
+    buttons.innerHTML = `
+      <button
+        class="outline"
+        data-lx="refresh"
+        ${lxFetching ? 'disabled' : ''}
+      >
+        ↻ Pakia upya
+      </button>
+    `;
+  }
+
+  lxRenderPage();
+};
+
+/* Pakia pia baada ya refresh ya mfumo au kuingia. */
+
+const lxLoadBeforeModule = load;
+
+load = async function(...args) {
+  await lxLoadBeforeModule(...args);
+
+  if (!lxAllowed()) {
+    lxReset();
+    return;
+  }
+
+  if (page === 'leonix-supply') {
+    await lxFetch();
+  }
+};
+
+/* Menu na pagination. */
+
+document.addEventListener('click', async event => {
+  const logout = event.target.closest(
+    '[data-action="logout"]'
+  );
+
+  if (logout && !busy) {
+    lxReset();
+    return;
+  }
+
+  const nav = event.target.closest(
+    '[data-action="nav"][data-page="leonix-supply"]'
+  );
+
+  const action = event.target.closest('[data-lx]');
+
+  if (!nav && !action) return;
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  if (busy || !lxAllowed()) return;
+
+  if (nav) {
+    page = 'leonix-supply';
+
+    $('#sidebar')?.classList.remove('open');
+    document.body.classList.remove('menuopen');
+
+    await lxFetch();
+    return;
+  }
+
+  if (lxFetching) return;
+
+  if (action.dataset.lx === 'prev' && lxPage > 0) {
+    lxPage--;
+
+  } else if (
+    action.dataset.lx === 'next' &&
+    (lxPage + 1) * 25 < lxTotal
+  ) {
+    lxPage++;
+
+  } else if (action.dataset.lx !== 'refresh') {
+    return;
+  }
+
+  await lxFetch();
+}, true);
+
+document.addEventListener('change', async event => {
+  if (event.target.id !== 'lx-status-filter') return;
+  if (!lxAllowed() || lxFetching) return;
+
+  lxStatus = event.target.value;
+  lxPage = 0;
+
+  await lxFetch();
+});
+
+/* MWISHO WA LEONIX CODE YA 4 */
   
   const initial=config();connect(SUPABASE_URL||initial.url,SUPABASE_ANON_KEY||initial.key);
 </script></body></html>
