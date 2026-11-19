@@ -3789,7 +3789,7 @@ async function lxViewTender(id) {
     );
 
     $('#dialog-title').textContent = tender.title;
-
+slot.dataset.tender = JSON.stringify(tender);
     slot.innerHTML = `
       <span class="rolepill">
         ${esc(LX_STATUS[tender.status] || tender.status)}
@@ -4000,6 +4000,236 @@ document.addEventListener('click', async event => {
 }, true);
 
 /* MWISHO WA LEONIX CODE YA 6 */
-  
+/* LEONIX — CODE YA 8 */
+
+function lxDecisionOptions(tender) {
+  const actions = {};
+
+  if (
+    lxOperate() &&
+    ['draft', 'preparing'].includes(tender.status)
+  ) {
+    actions.request = 'Wasilisha kwa General Manager';
+  }
+
+  const involved = [
+    tender.approval_requested_by,
+    tender.created_by,
+    tender.owner_id
+  ].includes(me.id);
+
+  if (
+    me.role === 'gm' &&
+    tender.status === 'pending_gm'
+  ) {
+    if (!involved) {
+      actions.recommend = 'Pendekeza kwa Directors';
+    }
+
+    actions.return = 'Rudisha kwa marekebisho';
+  }
+
+  if (
+    me.role === 'director' &&
+    tender.status === 'pending_directors'
+  ) {
+    if (
+      !involved &&
+      tender.gm_reviewed_by &&
+      tender.gm_reviewed_by !== me.id
+    ) {
+      actions.approve = 'Idhinisha kuwasilisha tender';
+    }
+
+    actions.return = 'Rudisha kwa marekebisho';
+  }
+
+  return actions;
+}
+
+/* Ongeza fomu baada ya taarifa za tender kupakia. */
+
+const lxViewBeforeDecisions = lxViewTender;
+
+lxViewTender = async function(id) {
+  if (!lxAllowed()) return;
+
+  const actor = lxActorKey();
+
+  await lxViewBeforeDecisions(id);
+
+  const slot = $('#lx-detail-content');
+
+  if (
+    actor !== lxActorKey() ||
+    !lxAllowed() ||
+    !$('#modal').open ||
+    !slot?.dataset.tender
+  ) return;
+
+  let tender;
+
+  try {
+    tender = JSON.parse(slot.dataset.tender);
+  } catch {
+    return;
+  }
+
+  if (
+    tender.id !== id ||
+    slot.querySelector('#lx-decision-form')
+  ) return;
+
+  const actions = lxDecisionOptions(tender);
+
+  if (!Object.keys(actions).length) return;
+
+  slot.insertAdjacentHTML('afterbegin', `
+    <form id="lx-decision-form"
+      style="padding:18px;border:1px solid #dce6e1;
+             border-radius:10px;margin-bottom:24px">
+
+      <h3>Uwasilishaji na idhini</h3>
+
+      <input type="hidden" name="tender_id"
+        value="${esc(tender.id)}">
+
+      <input type="hidden" name="version"
+        value="${Number(tender.version)}">
+
+      <label>
+        Hatua ya kufanya
+
+        <select name="action" required>
+          <option value="">Chagua hatua</option>
+          ${options(actions, '')}
+        </select>
+      </label>
+
+      <label>
+        Maelezo / sababu
+
+        <textarea name="note" rows="3"
+          minlength="3" maxlength="2000" required
+          placeholder="Eleza sababu ya kuwasilisha, kupendekeza, kuidhinisha au kurudisha."></textarea>
+      </label>
+
+      <p class="muted">
+        Idhini hii ni ya kuwasilisha tender.
+        Haithibitishi kupata tender, kufanya ununuzi
+        au kutoa malipo.
+      </p>
+
+      <button type="submit" style="margin-top:12px">
+        Wasilisha hatua uliyochagua
+      </button>
+    </form>
+  `);
+};
+
+/* Hifadhi kupitia sheria za database. */
+
+document.addEventListener('submit', async event => {
+  const form = event.target;
+
+  if (form.getAttribute('id') !== 'lx-decision-form') {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  if (busy) return;
+
+  if (!sb || !lxAllowed()) {
+    toast('Huna ruhusa ya kuendelea.');
+    return;
+  }
+
+  if (!form.reportValidity()) return;
+
+  const values = Object.fromEntries(new FormData(form));
+  const version = Number(values.version);
+  const note = values.note.trim();
+
+  if (!Number.isInteger(version) || version < 1) {
+    toast('Funga tender kisha ifungue tena.');
+    return;
+  }
+
+  if (note.length < 3) {
+    toast('Weka maelezo yenye angalau herufi 3.');
+    return;
+  }
+
+  const actor = lxActorKey();
+  const client = sb;
+
+  busy = true;
+
+  const controls = form.querySelectorAll(
+    'button, select, textarea'
+  );
+
+  controls.forEach(control => control.disabled = true);
+
+  try {
+    const result = await client.rpc(
+      'hub_leonix_tender_decide',
+      {
+        p_id: values.tender_id,
+        p_version: version,
+        p_action: values.action,
+        p_note: note
+      }
+    );
+
+    if (result.error) throw result.error;
+
+    if (!result.data) {
+      throw new Error('Uamuzi haujarudisha uthibitisho.');
+    }
+
+    busy = false;
+
+    if (
+      actor !== lxActorKey() ||
+      client !== sb ||
+      !lxAllowed()
+    ) return;
+
+    closeDialog();
+
+    /* Rudi ukurasa wa kwanza kwa hatua iliyochaguliwa. */
+    lxPage = 0;
+
+    await lxFetch();
+
+    if (
+      actor !== lxActorKey() ||
+      client !== sb ||
+      !lxAllowed()
+    ) return;
+
+    const messages = {
+      request: 'Tender imewasilishwa kwa General Manager.',
+      recommend: 'Tender imependekezwa kwa Directors.',
+      approve: 'Director ameidhinisha kuwasilisha tender.',
+      return: 'Tender imerudishwa kwa marekebisho.'
+    };
+
+    toast(messages[values.action] || 'Hatua imehifadhiwa.');
+
+  } catch (error) {
+    toast(errorText(error));
+
+  } finally {
+    busy = false;
+
+    controls.forEach(control => control.disabled = false);
+  }
+}, true);
+
+/* MWISHO WA LEONIX CODE YA 8 */  
   const initial=config();connect(SUPABASE_URL||initial.url,SUPABASE_ANON_KEY||initial.key);
 </script></body></html>
