@@ -4574,5 +4574,243 @@ document.addEventListener('submit', async event => {
 }, true);
 
 /* MWISHO WA LEONIX CODE YA 10 */
+
+/* LEONIX — CODE YA 12 */
+
+const lxViewBeforeResults = lxViewTender;
+
+lxViewTender = async function(id) {
+  const actor = lxActorKey();
+
+  await lxViewBeforeResults(id);
+
+  const slot = $('#lx-detail-content');
+
+  if (
+    actor !== lxActorKey() ||
+    !lxOperate() ||
+    !$('#modal').open ||
+    !slot?.dataset.tender
+  ) return;
+
+  let tender;
+
+  try {
+    tender = JSON.parse(slot.dataset.tender);
+  } catch {
+    return;
+  }
+
+  if (
+    tender.id !== id ||
+    slot.querySelector('#lx-result-form')
+  ) return;
+
+  let actions = {};
+
+  if (
+    tender.status === 'approved' &&
+    tender.director_approved_by
+  ) {
+    actions = {
+      submit: 'Tender imewasilishwa kwa taasisi'
+    };
+
+  } else if (tender.status === 'submitted') {
+    actions = {
+      won: 'Tender imepatikana',
+      lost: 'Tender haijapatikana'
+    };
+  }
+
+  if (!Object.keys(actions).length) return;
+
+  const minimumDate = tender.status === 'submitted'
+    ? tender.submitted_at
+    : tender.created_at;
+
+  const minimumDay = minimumDate
+    ? new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Africa/Nairobi',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).format(new Date(minimumDate))
+    : '';
+
+  slot.insertAdjacentHTML('afterbegin', `
+    <form id="lx-result-form"
+      style="padding:18px;border:1px solid #dce6e1;
+             border-radius:10px;margin-bottom:24px">
+
+      <h3>Rekodi uwasilishaji / matokeo</h3>
+
+      <input type="hidden" name="tender_id"
+        value="${esc(tender.id)}">
+
+      <input type="hidden" name="version"
+        value="${Number(tender.version)}">
+
+      <label>
+        Hatua iliyofanyika
+
+        <select name="action" required>
+          <option value="">Chagua hatua</option>
+          ${options(actions, '')}
+        </select>
+      </label>
+
+      <label>
+        Tarehe ya tukio — Tanzania
+
+        <input type="date" name="event_date"
+          min="${esc(minimumDay)}"
+          max="${esc(day())}"
+          required>
+      </label>
+
+      <label>
+        Rejea ya uthibitisho
+
+        <input name="reference"
+          minlength="2" maxlength="200" required
+          placeholder="Mfano: Submission receipt, award letter au taarifa ya matokeo">
+      </label>
+
+      <label>
+        Maelezo
+
+        <textarea name="note" rows="3"
+          minlength="3" maxlength="2000" required
+          placeholder="Eleza kilichofanyika na uthibitisho uliopatikana."></textarea>
+      </label>
+
+      <p class="muted">
+        Rejea hii ni maandishi; nyaraka hazipakizwi hapa.
+        Kurekodi kwamba tender imepatikana hakuidhinishi
+        ununuzi au malipo.
+      </p>
+
+      <button type="submit" style="margin-top:12px">
+        Hifadhi hatua / matokeo
+      </button>
+    </form>
+  `);
+};
+
+/* Hifadhi kupitia function ya Code ya 11. */
+
+document.addEventListener('submit', async event => {
+  const form = event.target;
+
+  if (form.getAttribute('id') !== 'lx-result-form') {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  if (busy) return;
+
+  if (!sb || !lxOperate()) {
+    toast('Huna ruhusa ya kurekodi hatua hii.');
+    return;
+  }
+
+  if (!form.reportValidity()) return;
+
+  const values = Object.fromEntries(new FormData(form));
+  const version = Number(values.version);
+  const note = values.note.trim();
+  const reference = values.reference.trim();
+
+  if (!Number.isInteger(version) || version < 1) {
+    toast('Funga tender kisha ifungue tena.');
+    return;
+  }
+
+  if (!['submit', 'won', 'lost'].includes(values.action)) {
+    toast('Chagua hatua iliyofanyika.');
+    return;
+  }
+
+  if (note.length < 3 || reference.length < 2) {
+    toast('Kamilisha maelezo na rejea ya uthibitisho.');
+    return;
+  }
+
+  const actor = lxActorKey();
+  const client = sb;
+
+  busy = true;
+
+  const controls = form.querySelectorAll(
+    'button, input, select, textarea'
+  );
+
+  controls.forEach(control => control.disabled = true);
+
+  try {
+    const result = await client.rpc(
+      'hub_leonix_tender_result',
+      {
+        p_id: values.tender_id,
+        p_version: version,
+        p_action: values.action,
+        p_note: note,
+        p_reference: reference,
+        p_event_date: values.event_date
+      }
+    );
+
+    if (result.error) throw result.error;
+
+    if (!result.data) {
+      throw new Error(
+        'Database haijarudisha uthibitisho wa hatua.'
+      );
+    }
+
+    busy = false;
+
+    if (
+      actor !== lxActorKey() ||
+      client !== sb ||
+      !lxOperate()
+    ) return;
+
+    closeDialog();
+
+    /* Onyesha rekodi katika hatua yake mpya. */
+    lxStatus = '';
+    lxPage = 0;
+
+    await lxFetch();
+
+    if (
+      actor !== lxActorKey() ||
+      client !== sb ||
+      !lxOperate()
+    ) return;
+
+    const messages = {
+      submit: 'Uwasilishaji wa tender umerekodiwa.',
+      won: 'Matokeo yamehifadhiwa: tender imepatikana.',
+      lost: 'Matokeo yamehifadhiwa: tender haijapatikana.'
+    };
+
+    toast(messages[values.action]);
+
+  } catch (error) {
+    toast(errorText(error));
+
+  } finally {
+    busy = false;
+
+    controls.forEach(control => control.disabled = false);
+  }
+}, true);
+
+/* MWISHO WA LEONIX CODE YA 12 */
   const initial=config();connect(SUPABASE_URL||initial.url,SUPABASE_ANON_KEY||initial.key);
 </script></body></html>
